@@ -1,0 +1,510 @@
+[
+  {
+    "accountNumber": "1",
+    "accountName": "COMPTES DE RESSOURCES DURABLES",
+    "parentNumber": null,
+    "description": "Classe 1 - Capitaux permanents"
+  },
+  {
+    "accountNumber": "10",
+    "accountName": "CAPITAL",
+    "parentNumber": "1"
+  },
+  {
+    "accountNumber": "101",
+    "accountName": "Capital social",
+    "parentNumber": "10"
+  },
+  {
+    "accountNumber": "1011",
+    "accountName": "Capital souscrit, appelé, versé",
+    "parentNumber": "101"
+  },
+  {
+    "accountNumber": "11",
+    "accountName": "RÉSERVES",
+    "parentNumber": "1"
+  },
+  {
+    "accountNumber": "111",
+    "accountName": "Réserve légale",
+    "parentNumber": "11"
+  },
+  {
+    "accountNumber": "12",
+    "accountName": "REPORT À NOUVEAU",
+    "parentNumber": "1"
+  },
+  {
+    "accountNumber": "121",
+    "accountName": "Report à nouveau créditeur",
+    "parentNumber": "12"
+  },
+  {
+    "accountNumber": "129",
+    "accountName": "Report à nouveau débiteur",
+    "parentNumber": "12"
+  },
+  {
+    "accountNumber": "13",
+    "accountName": "RÉSULTAT NET DE L'EXERCICE",
+    "parentNumber": "1"
+  },
+  {
+    "accountNumber": "16",
+    "accountName": "EMPRUNTS ET DETTES ASSIMILÉES",
+    "parentNumber": "1"
+  },
+  {
+    "accountNumber": "161",
+    "accountName": "Emprunts obligataires",
+    "parentNumber": "16"
+  },
+  {
+    "accountNumber": "162",
+    "accountName": "Emprunts auprès des établissements de crédit",
+    "parentNumber": "16"
+  },
+  
+  {
+    "accountNumber": "2",
+    "accountName": "COMPTES D'ACTIF IMMOBILISÉ",
+    "parentNumber": null,
+    "description": "Classe 2 - Immobilisations"
+  },
+  {
+    "accountNumber": "21",
+    "accountName": "IMMOBILISATIONS INCORPORELLES",
+    "parentNumber": "2"
+  },
+  {
+    "accountNumber": "211",
+    "accountName": "Frais de développement et de prospection",
+    "parentNumber": "21"
+  },
+  {
+    "accountNumber": "212",
+    "accountName": "Brevets, licences, logiciels",
+    "parentNumber": "21"
+  },
+  {
+    "accountNumber": "22",
+    "accountName": "TERRAINS",
+    "parentNumber": "2"
+  },
+  {
+    "accountNumber": "221",
+    "accountName": "Terrains agricoles et forestiers",
+    "parentNumber": "22"
+  },
+  {
+    "accountNumber": "222",
+    "accountName": "Terrains nus",
+    "parentNumber": "22"
+  },
+  {
+    "accountNumber": "23",
+    "accountName": "BÂTIMENTS, INSTALLATIONS TECHNIQUES ET AGENCEMENTS",
+    "parentNumber": "2"
+  },
+  {
+    "accountNumber": "231",
+    "accountName": "Bâtiments industriels, agricoles et commerciaux",
+    "parentNumber": "23"
+  },
+  {
+    "accountNumber": "24",
+    "accountName": "MATÉRIEL",
+    "parentNumber": "2"
+  },
+  {
+    "accountNumber": "241",
+    "accountName": "Matériel et outillage industriel et commercial",
+    "parentNumber": "24"
+  },
+  {
+    "accountNumber": "244",
+    "accountName": "Matériel de transport",
+    "parentNumber": "24"
+  },
+  {
+    "accountNumber": "245",
+    "accountName": "Matériel de bureau et informatique",
+    "parentNumber": "24"
+  },
+  
+  {
+    "accountNumber": "3",
+    "accountName": "COMPTES DE STOCKS",
+    "parentNumber": null,
+    "description": "Classe 3 - Stocks et en-cours"
+  },
+  {
+    "accountNumber": "31",
+    "accountName": "MARCHANDISES",
+    "parentNumber": "3"
+  },
+  {
+    "accountNumber": "311",
+    "accountName": "Marchandises A",
+    "parentNumber": "31"
+  },
+  {
+    "accountNumber": "32",
+    "accountName": "MATIÈRES PREMIÈRES ET FOURNITURES LIÉES",
+    "parentNumber": "3"
+  },
+  {
+    "accountNumber": "33",
+    "accountName": "AUTRES APPROVISIONNEMENTS",
+    "parentNumber": "3"
+  },
+  
+  {
+    "accountNumber": "4",
+    "accountName": "COMPTES DE TIERS",
+    "parentNumber": null,
+    "description": "Classe 4 - Créances et dettes"
+  },
+  {
+    "accountNumber": "40",
+    "accountName": "FOURNISSEURS ET COMPTES RATTACHÉS",
+    "parentNumber": "4"
+  },
+  {
+    "accountNumber": "401",
+    "accountName": "Fournisseurs",
+    "parentNumber": "40"
+  },
+  {
+    "accountNumber": "4011",
+    "accountName": "Fournisseurs - Achats de biens",
+    "parentNumber": "401"
+  },
+  {
+    "accountNumber": "408",
+    "accountName": "Fournisseurs - Factures non parvenues",
+    "parentNumber": "40"
+  },
+  {
+    "accountNumber": "41",
+    "accountName": "CLIENTS ET COMPTES RATTACHÉS",
+    "parentNumber": "4"
+  },
+  {
+    "accountNumber": "411",
+    "accountName": "Clients",
+    "parentNumber": "41"
+  },
+  {
+    "accountNumber": "4111",
+    "accountName": "Clients - Ventes de biens",
+    "parentNumber": "411"
+  },
+  {
+    "accountNumber": "416",
+    "accountName": "Clients douteux",
+    "parentNumber": "41"
+  },
+  {
+    "accountNumber": "42",
+    "accountName": "PERSONNEL",
+    "parentNumber": "4"
+  },
+  {
+    "accountNumber": "421",
+    "accountName": "Personnel - Avances et acomptes",
+    "parentNumber": "42"
+  },
+  {
+    "accountNumber": "422",
+    "accountName": "Personnel - Rémunérations dues",
+    "parentNumber": "42"
+  },
+  {
+    "accountNumber": "43",
+    "accountName": "ORGANISMES SOCIAUX",
+    "parentNumber": "4"
+  },
+  {
+    "accountNumber": "431",
+    "accountName": "Sécurité sociale",
+    "parentNumber": "43"
+  },
+  {
+    "accountNumber": "44",
+    "accountName": "ÉTAT ET COLLECTIVITÉS PUBLIQUES",
+    "parentNumber": "4"
+  },
+  {
+    "accountNumber": "442",
+    "accountName": "État - Impôts et taxes recouvrables",
+    "parentNumber": "44"
+  },
+  {
+    "accountNumber": "443",
+    "accountName": "Opérations particulières avec l'État",
+    "parentNumber": "44"
+  },
+  {
+    "accountNumber": "4431",
+    "accountName": "TVA collectée",
+    "parentNumber": "443"
+  },
+  {
+    "accountNumber": "4451",
+    "accountName": "TVA déductible",
+    "parentNumber": "443"
+  },
+  {
+    "accountNumber": "444",
+    "accountName": "État - Impôts sur les bénéfices",
+    "parentNumber": "44"
+  },
+  
+  {
+    "accountNumber": "5",
+    "accountName": "COMPTES DE TRÉSORERIE",
+    "parentNumber": null,
+    "description": "Classe 5 - Trésorerie et valeurs mobilières"
+  },
+  {
+    "accountNumber": "52",
+    "accountName": "BANQUES, ÉTABLISSEMENTS FINANCIERS ET ASSIMILÉS",
+    "parentNumber": "5"
+  },
+  {
+    "accountNumber": "521",
+    "accountName": "Banques locales",
+    "parentNumber": "52"
+  },
+  {
+    "accountNumber": "53",
+    "accountName": "ÉTABLISSEMENTS FINANCIERS ET ASSIMILÉS",
+    "parentNumber": "5"
+  },
+  {
+    "accountNumber": "54",
+    "accountName": "INSTRUMENTS DE TRÉSORERIE",
+    "parentNumber": "5"
+  },
+  {
+    "accountNumber": "57",
+    "accountName": "CAISSE",
+    "parentNumber": "5"
+  },
+  {
+    "accountNumber": "571",
+    "accountName": "Caisse siège social",
+    "parentNumber": "57"
+  },
+  {
+    "accountNumber": "58",
+    "accountName": "VIREMENTS INTERNES",
+    "parentNumber": "5"
+  },
+  
+  {
+    "accountNumber": "6",
+    "accountName": "COMPTES DE CHARGES",
+    "parentNumber": null,
+    "description": "Classe 6 - Charges par nature"
+  },
+  {
+    "accountNumber": "60",
+    "accountName": "ACHATS ET VARIATIONS DE STOCKS",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "601",
+    "accountName": "Achats de marchandises",
+    "parentNumber": "60"
+  },
+  {
+    "accountNumber": "602",
+    "accountName": "Achats de matières premières",
+    "parentNumber": "60"
+  },
+  {
+    "accountNumber": "605",
+    "accountName": "Achats de fournitures non stockables",
+    "parentNumber": "60"
+  },
+  {
+    "accountNumber": "61",
+    "accountName": "TRANSPORTS",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "611",
+    "accountName": "Transports sur achats",
+    "parentNumber": "61"
+  },
+  {
+    "accountNumber": "612",
+    "accountName": "Transports sur ventes",
+    "parentNumber": "61"
+  },
+  {
+    "accountNumber": "62",
+    "accountName": "SERVICES EXTÉRIEURS A",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "622",
+    "accountName": "Locations et charges locatives",
+    "parentNumber": "62"
+  },
+  {
+    "accountNumber": "624",
+    "accountName": "Entretien, réparations et maintenance",
+    "parentNumber": "62"
+  },
+  {
+    "accountNumber": "625",
+    "accountName": "Primes d'assurances",
+    "parentNumber": "62"
+  },
+  {
+    "accountNumber": "63",
+    "accountName": "SERVICES EXTÉRIEURS B",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "631",
+    "accountName": "Frais bancaires",
+    "parentNumber": "63"
+  },
+  {
+    "accountNumber": "632",
+    "accountName": "Rémunérations d'intermédiaires et de conseils",
+    "parentNumber": "63"
+  },
+  {
+    "accountNumber": "64",
+    "accountName": "IMPÔTS ET TAXES",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "641",
+    "accountName": "Impôts et taxes directs",
+    "parentNumber": "64"
+  },
+  {
+    "accountNumber": "645",
+    "accountName": "Impôts et taxes indirects",
+    "parentNumber": "64"
+  },
+  {
+    "accountNumber": "66",
+    "accountName": "CHARGES DE PERSONNEL",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "661",
+    "accountName": "Rémunérations directes versées au personnel national",
+    "parentNumber": "66"
+  },
+  {
+    "accountNumber": "664",
+    "accountName": "Charges sociales",
+    "parentNumber": "66"
+  },
+  {
+    "accountNumber": "67",
+    "accountName": "FRAIS FINANCIERS ET CHARGES ASSIMILÉES",
+    "parentNumber": "6"
+  },
+  {
+    "accountNumber": "671",
+    "accountName": "Intérêts des emprunts",
+    "parentNumber": "67"
+  },
+  {
+    "accountNumber": "672",
+    "accountName": "Intérêts dans loyers de crédit-bail",
+    "parentNumber": "67"
+  },
+  
+  {
+    "accountNumber": "7",
+    "accountName": "COMPTES DE PRODUITS",
+    "parentNumber": null,
+    "description": "Classe 7 - Produits par nature"
+  },
+  {
+    "accountNumber": "70",
+    "accountName": "VENTES",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "701",
+    "accountName": "Ventes de marchandises",
+    "parentNumber": "70"
+},
+  {
+    "accountNumber": "702",
+    "accountName": "Ventes de produits finis",
+    "parentNumber": "70"
+  },
+  {
+    "accountNumber": "703",
+    "accountName": "Ventes de produits intermédiaires",
+    "parentNumber": "70"
+  },
+  {
+    "accountNumber": "704",
+    "accountName": "Ventes de produits résiduels",
+    "parentNumber": "70"
+  },
+  {
+    "accountNumber": "706",
+    "accountName": "Prestations de services",
+    "parentNumber": "70"
+  },
+  {
+    "accountNumber": "707",
+    "accountName": "Produits accessoires",
+    "parentNumber": "70"
+  },
+  {
+    "accountNumber": "71",
+    "accountName": "SUBVENTIONS D'EXPLOITATION",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "72",
+    "accountName": "PRODUCTION IMMOBILISÉE",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "73",
+    "accountName": "VARIATIONS DES STOCKS",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "75",
+    "accountName": "AUTRES PRODUITS",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "77",
+    "accountName": "REVENUS FINANCIERS ET PRODUITS ASSIMILÉS",
+    "parentNumber": "7"
+  },
+  {
+    "accountNumber": "771",
+    "accountName": "Intérêts de prêts",
+    "parentNumber": "77"
+  },
+  {
+    "accountNumber": "773",
+    "accountName": "Escomptes obtenus",
+    "parentNumber": "77"
+  },
+  {
+    "accountNumber": "78",
+    "accountName": "TRANSFERTS DE CHARGES",
+    "parentNumber": "7"
+  }
+]

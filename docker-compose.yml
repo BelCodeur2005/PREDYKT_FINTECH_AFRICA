@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: predykt-postgres
+    environment:
+      POSTGRES_DB: predykt_db
+      POSTGRES_USER: predykt
+      POSTGRES_PASSWORD: predykt_secure_2024
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=fr_FR.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - predykt-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predykt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: predykt-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - predykt-network
+    command: redis-server --appendonly yes --requirepass redis_secure_2024
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # PgAdmin (optionnel, pour gestion visuelle DB)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: predykt-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@predykt.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    networks:
+      - predykt-network
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  predykt-network:
+    driver: bridge
