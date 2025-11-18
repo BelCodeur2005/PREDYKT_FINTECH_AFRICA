@@ -1,5 +1,5 @@
 package com.predykt.accounting.dto.request;
 
-public class TransactionImportRequest { 
+public class TreasuryProjectionRequest { 
 	
 }
