@@ -1,0 +1,193 @@
+# Template Docker Compose pour chaque Tenant (Mono-Tenant Dédié)
+# Ce fichier sera dupliqué/généré automatiquement pour chaque nouveau client
+# Variables : TENANT_ID, TENANT_DOMAIN, DB_PASSWORD, etc.
+
+version: '3.8'
+
+services:
+  # Application Spring Boot dédiée au tenant
+  predykt-app-${TENANT_ID}:
+    image: predykt/accounting:${VERSION:-latest}
+    container_name: predykt-app-${TENANT_ID}
+    restart: unless-stopped
+    environment:
+      # Configuration Tenant
+      TENANT_ID: ${TENANT_ID}
+      TENANT_DOMAIN: ${TENANT_DOMAIN}  # ex: erp.companyA.com
+      
+      # Base de données dédiée
+      DB_HOST: postgres-${TENANT_ID}
+      DB_PORT: 5432
+      DB_NAME: predykt_${TENANT_ID}
+      DB_USER: predykt_${TENANT_ID}
+      DB_PASSWORD: ${DB_PASSWORD}
+      
+      # Redis dédié
+      REDIS_HOST: redis-${TENANT_ID}
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      
+      # JWT & Sécurité (unique par tenant)
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 86400000
+      
+      # Profil Spring
+      SPRING_PROFILES_ACTIVE: prod-tenant
+      
+      # Configuration JVM
+      JAVA_OPTS: >-
+        -Xms512m
+        -Xmx2048m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+        -Dspring.datasource.hikari.maximum-pool-size=20
+      
+      # Timezone
+      TZ: Africa/Douala
+      
+      # Monitoring
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,metrics,prometheus
+      
+    ports:
+      - "${APP_PORT}:8080"  # Port unique par tenant (ex: 8001, 8002, etc.)
+    
+    volumes:
+      - ./logs/${TENANT_ID}:/app/logs
+      - ./data/${TENANT_ID}/uploads:/app/uploads
+    
+    networks:
+      - predykt-network-${TENANT_ID}
+    
+    depends_on:
+      postgres-${TENANT_ID}:
+        condition: service_healthy
+      redis-${TENANT_ID}:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.predykt-${TENANT_ID}.rule=Host(`${TENANT_DOMAIN}`)"
+      - "traefik.http.routers.predykt-${TENANT_ID}.entrypoints=websecure"
+      - "traefik.http.routers.predykt-${TENANT_ID}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.predykt-${TENANT_ID}.loadbalancer.server.port=8080"
+
+  # PostgreSQL dédié au tenant
+  postgres-${TENANT_ID}:
+    image: postgres:15-alpine
+    container_name: postgres-${TENANT_ID}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: predykt_${TENANT_ID}
+      POSTGRES_USER: predykt_${TENANT_ID}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=fr_FR.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    
+    ports:
+      - "${DB_PORT}:5432"  # Port unique (ex: 5401, 5402, etc.)
+    
+    volumes:
+      - postgres-data-${TENANT_ID}:/var/lib/postgresql/data
+      - ./backups/${TENANT_ID}/postgres:/backups
+      - ./scripts/init-tenant-db.sql:/docker-entrypoint-initdb.d/init.sql
+    
+    networks:
+      - predykt-network-${TENANT_ID}
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predykt_${TENANT_ID}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2621kB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c log_statement=mod
+      -c log_duration=on
+
+  # Redis dédié au tenant
+  redis-${TENANT_ID}:
+    image: redis:7-alpine
+    container_name: redis-${TENANT_ID}
+    restart: unless-stopped
+    
+    ports:
+      - "${REDIS_PORT}:6379"  # Port unique (ex: 6401, 6402, etc.)
+    
+    volumes:
+      - redis-data-${TENANT_ID}:/data
+      - ./config/redis-${TENANT_ID}.conf:/usr/local/etc/redis/redis.conf
+    
+    networks:
+      - predykt-network-${TENANT_ID}
+    
+    command: >
+      redis-server
+      /usr/local/etc/redis/redis.conf
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Backup automatique (optionnel mais recommandé)
+  backup-${TENANT_ID}:
+    image: prodrigestivill/postgres-backup-local
+    container_name: backup-${TENANT_ID}
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres-${TENANT_ID}
+      POSTGRES_DB: predykt_${TENANT_ID}
+      POSTGRES_USER: predykt_${TENANT_ID}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      SCHEDULE: "@daily"  # Backup quotidien à minuit
+      BACKUP_KEEP_DAYS: 30
+      BACKUP_KEEP_WEEKS: 8
+      BACKUP_KEEP_MONTHS: 12
+      HEALTHCHECK_PORT: 8080
+    
+    volumes:
+      - ./backups/${TENANT_ID}/postgres:/backups
+    
+    networks:
+      - predykt-network-${TENANT_ID}
+    
+    depends_on:
+      - postgres-${TENANT_ID}
+
+volumes:
+  postgres-data-${TENANT_ID}:
+    driver: local
+  redis-data-${TENANT_ID}:
+    driver: local
+
+networks:
+  predykt-network-${TENANT_ID}:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.${TENANT_SUBNET_OCTET}.0.0/16  # Subnet unique par tenant

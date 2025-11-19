@@ -138,3 +138,18 @@ predykt:
   integration:
     python-ml-api-url: ${PYTHON_API_URL:http://localhost:8000}
     timeout-seconds: 30
+
+# =========================================================================
+# BLOC DE SURCHARGE POUR LE PROFIL MONO-TENANT DÉDIÉ
+# (Activé par Docker Compose via SPRING_PROFILES_ACTIVE=prod-tenant)
+# =========================================================================
+spring:
+  config:
+    activate:
+      on-profile: prod-tenant
+
+  # 💥 ACTION CRITIQUE : DÉSACTIVER l'auto-configuration du DataSource.
+  # Le DataSource est maintenant créé manuellement par la classe TenantDatabaseConfig.java.
+  autoconfigure:
+    exclude: 
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
