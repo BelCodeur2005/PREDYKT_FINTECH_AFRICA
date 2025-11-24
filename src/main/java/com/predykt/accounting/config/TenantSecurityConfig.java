@@ -1,27 +1,31 @@
 package com.predykt.accounting.config;
 
+import com.predykt.accounting.security.JwtAuthenticationFilter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.XXssProtectionHeaderWriter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import jakarta.servlet.http.HttpServletRequest;import java.util.Arrays;
+import jakarta.servlet.http.HttpServletRequest;
+import java.util.Arrays;
 import java.util.List;
-import org.springframework.context.annotation.Profile;
-import org.springframework.security.web.header.writers.XXssProtectionHeaderWriter;
 
 /**
  * Configuration de sécurité renforcée pour architecture Mono-Tenant
@@ -30,8 +34,11 @@ import org.springframework.security.web.header.writers.XXssProtectionHeaderWrite
 @Configuration
 @EnableWebSecurity
 @Profile("prod-tenant")
+@RequiredArgsConstructor
 @Slf4j
 public class TenantSecurityConfig {
+    
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
     
     @Value("${TENANT_ID}")
     private String tenantId;
@@ -75,14 +82,17 @@ public class TenantSecurityConfig {
                 // Tous les autres endpoints nécessitent une authentification
                 .anyRequest().authenticated()
             )
+            // 🆕 L'INTÉGRATION FINALE DU FILTRE D'AUTHENTIFICATION JWT 
+            // Il s'exécute avant le filtre d'authentification classique de Spring
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class) // AJOUT CLÉ
             
             // Headers de sécurité renforcés
             .headers(headers -> headers
                 // Protection XSS
-        		.xssProtection(xss -> xss
-        			    // 🆕 CORRECTION : Utiliser la valeur énumérée ENUM
-        			  .headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK)
-        			)
+                .xssProtection(xss -> xss
+                    .headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK)
+                )
+                
                 // Protection Content Type Sniffing
                 .contentTypeOptions(contentType -> contentType.disable())
                 

@@ -1,19 +1,18 @@
 // ============================================
-// RegisterRequest.java
+// UserCreateRequest.java
 // ============================================
 package com.predykt.accounting.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.Set;
+
 @Data
-public class RegisterRequest {
-    
-    @NotNull(message = "L'ID de l'entreprise est obligatoire")
-    private Long companyId;
+public class UserCreateRequest {
     
     @NotBlank(message = "L'email est obligatoire")
     @Email(message = "Format email invalide")
@@ -30,4 +29,7 @@ public class RegisterRequest {
     private String lastName;
     
     private String phone;
+    
+    @NotEmpty(message = "Au moins un rôle est requis")
+    private Set<Integer> roleIds;
 }

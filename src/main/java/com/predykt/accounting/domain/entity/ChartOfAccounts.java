@@ -43,7 +43,7 @@ public class ChartOfAccounts extends BaseEntity {
     @Column(name = "account_type", nullable = false, length = 50)
     private AccountType accountType;
     
-@ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_account_id")
     private ChartOfAccounts parentAccount;
     

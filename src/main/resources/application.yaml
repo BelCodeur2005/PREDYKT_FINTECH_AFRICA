@@ -143,13 +143,58 @@ predykt:
 # BLOC DE SURCHARGE POUR LE PROFIL MONO-TENANT DÉDIÉ
 # (Activé par Docker Compose via SPRING_PROFILES_ACTIVE=prod-tenant)
 # =========================================================================
+# =========================================================================
+# CONFIGURATION PROD-TENANT (Architecture Mono-Tenant Dédiée)
+# =========================================================================
+---
 spring:
   config:
     activate:
       on-profile: prod-tenant
 
-  # 💥 ACTION CRITIQUE : DÉSACTIVER l'auto-configuration du DataSource.
-  # Le DataSource est maintenant créé manuellement par la classe TenantDatabaseConfig.java.
+  # Désactiver auto-configuration DataSource (géré par TenantDatabaseConfig)
   autoconfigure:
     exclude: 
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+  
+  # JWT Configuration
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      expiration: ${JWT_EXPIRATION:86400000}
+
+# Serveur Central Configuration
+central:
+  api:
+    url: ${CENTRAL_API_URL:http://central.predykt.com:8000}
+    timeout-seconds: 30
+
+# License Validation
+license:
+  validation:
+    enabled: true
+    check-on-startup: true
+    daily-check-time: "02:00"
+
+# Metrics Push
+metrics:
+  push:
+    enabled: true
+    interval-hours: 1
+
+# Audit Configuration
+audit:
+  enabled: true
+  retention-days: 2555  # 7 ans (conformité légale)
+  async: true
+
+# Security Headers
+security:
+  headers:
+    hsts:
+      enabled: true
+      include-subdomains: true
+      max-age: 31536000
+    csp:
+      enabled: true
+      policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
