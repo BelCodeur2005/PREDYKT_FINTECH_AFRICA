@@ -90,7 +90,7 @@ public class ChartOfAccountsController {
                description = "Ajoute un nouveau compte comptable personnalisé au plan")
     public ResponseEntity<ApiResponse<ChartOfAccounts>> createCustomAccount(
             @PathVariable Long companyId,
-            @Valid @RequestBody AccountCreateRequest request) {
+            @Valid @RequestBody ChartOfAccounts request) {
         
         ChartOfAccounts account = chartService.createCustomAccount(companyId, request);
         
@@ -126,7 +126,7 @@ public class ChartOfAccountsController {
             @PathVariable Long companyId,
             @PathVariable Long accountId) {
         
-        chartService.deactivateAccount(companyId, accountId);
+        chartService.desactivateAccount(companyId, accountId);
         
         return ResponseEntity.ok(ApiResponse.success(
             null,

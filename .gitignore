@@ -32,3 +32,28 @@ build/
 ### VS Code ###
 .vscode/
 /bin/
+
+### PREDYKT - Fichiers sensibles ###
+# Variables d'environnement (contiennent des secrets)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Backups (peuvent contenir des données sensibles)
+/backups/
+*.sql
+*.sql.gz
+*.rdb
+
+# Logs
+/logs/
+*.log
+*.log.*
+
+# Uploads (données clients)
+/data/uploads/
+
+# Configurations tenants (contiennent secrets)
+/tenants/
+tenants-registry.log

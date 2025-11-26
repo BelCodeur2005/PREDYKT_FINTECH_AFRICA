@@ -1,87 +1,59 @@
+# ============================================
+# application.yaml - Configuration Multi-Mode
+# ============================================
+
 spring:
   application:
     name: predykt-accounting
-    
+  
   profiles:
     active: ${SPRING_PROFILE:dev}
   
-  # Database
+  # ========== DATABASE (par défaut) ==========
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:predykt_db}
     username: ${DB_USER:predykt}
-    password: ${DB_PASSWORD:predykt_secure_2024}
+    password: ${DB_PASSWORD:predykt_secure}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 10
+      maximum-pool-size: 20
       minimum-idle: 5
-      connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
   
-  # JPA/Hibernate
   jpa:
     hibernate:
-      ddl-auto: validate  # IMPORTANT : Flyway gère les migrations
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
-        use_sql_comments: true
-        jdbc:
-          batch_size: 20
-        order_inserts: true
-        order_updates: true
-        # Audit automatique
-        default_schema: public
-    open-in-view: false  # Performance best practice
   
-  # Flyway (migrations DB)
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
-    table: schema_version
-  
-  # Redis Cache
+
+# Swagger/OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method
+    tags-sorter: alpha
+    
+  # ========== REDIS ==========
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:redis_secure_2024}
-      timeout: 2000ms
-      jedis:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
+      password: ${REDIS_PASSWORD:}
   
-  cache:
-    type: redis
-    redis:
-      time-to-live: 3600000  # 1 heure
-      cache-null-values: false
-  
-  # Security
+  # ========== SECURITY ==========
   security:
     jwt:
-      secret: ${JWT_SECRET}
-      expiration: ${JWT_EXPIRATION:86400000}  # 24 heures
-
-# Server
-server:
-  port: ${SERVER_PORT:8080}
-  servlet:
-    context-path: /api/v1
-  error:
-    include-message: always
-    include-binding-errors: always
-    include-stacktrace: never
-    include-exception: false
-  compression:
-    enabled: true
-    mime-types: application/json,application/xml,text/html,text/xml,text/plain
-
+      secret: ${JWT_SECRET:VotreCleSecreteSuperSecurisee2024}
+      expiration: 86400000
 # Actuator (Monitoring)
 management:
   endpoints:
@@ -96,105 +68,99 @@ management:
     export:
       prometheus:
         enabled: true
+# ========== SERVER ==========
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api/v1
 
-# Logging
+# ========== MULTI-TENANT CONFIGURATION ==========
+predykt:
+  tenant:
+    # MODE : SHARED | DEDICATED | CABINET
+    mode: ${PREDYKT_TENANT_MODE:SHARED}
+    
+    # ID du tenant (DEDICATED/CABINET uniquement)
+    id: ${PREDYKT_TENANT_ID:}
+    
+    # ID du cabinet (CABINET uniquement)
+    cabinet-id: ${PREDYKT_TENANT_CABINET_ID:}
+    
+    # Activer le routing de DataSource
+    routing:
+      enabled: true
+
+# ========== LOGGING ==========
 logging:
   level:
     root: INFO
     com.predykt: DEBUG
-    org.springframework.web: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
-  file:
-    name: logs/predykt-accounting.log
-    max-size: 10MB
-    max-history: 30
+    com.predykt.accounting.config.TenantContextHolder: DEBUG
+    com.predykt.accounting.config.TenantInterceptor: DEBUG
 
-# Swagger/OpenAPI
-springdoc:
-  api-docs:
-    path: /api-docs
-  swagger-ui:
-    path: /swagger-ui.html
-    enabled: true
-    operations-sorter: method
-    tags-sorter: alpha
-
-# Application custom properties
-predykt:
-  accounting:
-    default-currency: XAF
-    default-country: CM
-    fiscal-year-start: 01-01
-    fiscal-year-end: 12-31
-  
-  audit:
-    enabled: true
-    retention-days: 2555  # 7 ans (exigence légale)
-  
-  integration:
-    python-ml-api-url: ${PYTHON_API_URL:http://localhost:8000}
-    timeout-seconds: 30
-
-# =========================================================================
-# BLOC DE SURCHARGE POUR LE PROFIL MONO-TENANT DÉDIÉ
-# (Activé par Docker Compose via SPRING_PROFILES_ACTIVE=prod-tenant)
-# =========================================================================
-# =========================================================================
-# CONFIGURATION PROD-TENANT (Architecture Mono-Tenant Dédiée)
-# =========================================================================
 ---
+# ============================================
+# PROFIL : MODE SHARED (PME Mutualisée)
+# ============================================
 spring:
   config:
     activate:
-      on-profile: prod-tenant
+      on-profile: shared
 
-  # Désactiver auto-configuration DataSource (géré par TenantDatabaseConfig)
-  autoconfigure:
-    exclude: 
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-  
-  # JWT Configuration
-  security:
-    jwt:
-      secret: ${JWT_SECRET}
-      expiration: ${JWT_EXPIRATION:86400000}
+predykt:
+  tenant:
+    mode: SHARED
 
-# Serveur Central Configuration
-central:
-  api:
-    url: ${CENTRAL_API_URL:http://central.predykt.com:8000}
-    timeout-seconds: 30
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [🟢SHARED] [%thread] %-5level %logger{36} - %msg%n"
 
-# License Validation
-license:
-  validation:
-    enabled: true
-    check-on-startup: true
-    daily-check-time: "02:00"
+---
+# ============================================
+# PROFIL : MODE DEDICATED (ETI Isolée)
+# ============================================
+spring:
+  config:
+    activate:
+      on-profile: dedicated
 
-# Metrics Push
-metrics:
-  push:
-    enabled: true
-    interval-hours: 1
+predykt:
+  tenant:
+    mode: DEDICATED
+    id: ${PREDYKT_TENANT_ID} # OBLIGATOIRE
 
-# Audit Configuration
-audit:
-  enabled: true
-  retention-days: 2555  # 7 ans (conformité légale)
-  async: true
+# Base de données dédiée au tenant
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/predykt_tenant_${PREDYKT_TENANT_ID}
+    username: ${DB_USER:predykt}
+    password: ${DB_PASSWORD}
 
-# Security Headers
-security:
-  headers:
-    hsts:
-      enabled: true
-      include-subdomains: true
-      max-age: 31536000
-    csp:
-      enabled: true
-      policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [🔵DEDICATED-${PREDYKT_TENANT_ID}] [%thread] %-5level %logger{36} - %msg%n"
+
+---
+# ============================================
+# PROFIL : MODE CABINET (Hybride)
+# ============================================
+spring:
+  config:
+    activate:
+      on-profile: cabinet
+
+predykt:
+  tenant:
+    mode: CABINET
+    cabinet-id: ${PREDYKT_TENANT_CABINET_ID} # OBLIGATOIRE
+
+# Base de données dédiée au cabinet
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/predykt_cabinet_${PREDYKT_TENANT_CABINET_ID}
+    username: ${DB_USER:predykt}
+    password: ${DB_PASSWORD}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [🟡CABINET-${PREDYKT_TENANT_CABINET_ID}] [%thread] %-5level %logger{36} - %msg%n"

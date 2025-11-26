@@ -1,0 +1,258 @@
+version: '3.8'
+
+################################################################################
+# Docker Compose - Mode CABINET (Production Cabinet Comptable)
+# Usage: docker-compose -f docker-compose.cabinet.yml --env-file .env.cabinet up -d
+#
+# Description:
+# - Base de données dédiée au cabinet
+# - Gère plusieurs dossiers clients (companies) dans la même DB
+# - Isolation au niveau ligne (company_id) mais DB séparée par cabinet
+# - Un cabinet = une instance dédiée
+################################################################################
+
+services:
+  # Application Spring Boot (mode CABINET)
+  predykt-app-cabinet:
+    image: predykt/accounting:${VERSION:-latest}
+    container_name: predykt-app-cabinet-${CABINET_ID}
+    restart: unless-stopped
+
+    environment:
+      # Configuration Multi-Tenant CABINET
+      PREDYKT_TENANT_MODE: CABINET
+      PREDYKT_TENANT_CABINET_ID: ${CABINET_ID}
+      SPRING_PROFILES_ACTIVE: cabinet
+
+      # Base de données dédiée au cabinet
+      DB_HOST: postgres-cabinet-${CABINET_ID}
+      DB_PORT: 5432
+      DB_NAME: predykt_cabinet_${CABINET_ID}
+      DB_USER: predykt_cabinet_${CABINET_ID}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      # Redis dédié au cabinet
+      REDIS_HOST: redis-cabinet-${CABINET_ID}
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+      # JWT (clé unique par cabinet)
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+
+      # Informations du cabinet
+      CABINET_NAME: ${CABINET_NAME}
+      CABINET_DOMAIN: ${CABINET_DOMAIN}
+
+      # Configuration JVM
+      JAVA_OPTS: >-
+        -Xms512m
+        -Xmx2048m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+        -Dspring.datasource.hikari.maximum-pool-size=30
+        -Dspring.datasource.hikari.minimum-idle=5
+
+      # Timezone
+      TZ: Africa/Douala
+
+      # Monitoring
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,metrics,prometheus,info
+
+    ports:
+      - "${APP_PORT}:8080"
+
+    volumes:
+      - ./logs/cabinet-${CABINET_ID}:/app/logs
+      - ./data/cabinet-${CABINET_ID}/uploads:/app/uploads
+
+    networks:
+      - predykt-network-cabinet-${CABINET_ID}
+
+    depends_on:
+      postgres-cabinet-${CABINET_ID}:
+        condition: service_healthy
+      redis-cabinet-${CABINET_ID}:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    labels:
+      - "com.predykt.cabinet.id=${CABINET_ID}"
+      - "com.predykt.cabinet.name=${CABINET_NAME}"
+      - "traefik.enable=true"
+      - "traefik.http.routers.cabinet-${CABINET_ID}.rule=Host(`${CABINET_DOMAIN}`)"
+      - "traefik.http.routers.cabinet-${CABINET_ID}.entrypoints=websecure"
+      - "traefik.http.routers.cabinet-${CABINET_ID}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.cabinet-${CABINET_ID}.loadbalancer.server.port=8080"
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 3G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # PostgreSQL dédié au cabinet
+  postgres-cabinet-${CABINET_ID}:
+    image: postgres:15-alpine
+    container_name: predykt-postgres-cabinet-${CABINET_ID}
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: predykt_cabinet_${CABINET_ID}
+      POSTGRES_USER: predykt_cabinet_${CABINET_ID}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=fr_FR.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    ports:
+      - "${DB_PORT}:5432"
+
+    volumes:
+      - postgres-data-cabinet-${CABINET_ID}:/var/lib/postgresql/data
+      - ./backups/cabinet-${CABINET_ID}/postgres:/backups
+      - ./scripts/init-tenant-db.sql:/docker-entrypoint-initdb.d/init.sql
+
+    networks:
+      - predykt-network-cabinet-${CABINET_ID}
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predykt_cabinet_${CABINET_ID}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2621kB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c log_statement=mod
+      -c log_duration=on
+      -c log_min_duration_statement=1000
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # Redis dédié au cabinet
+  redis-cabinet-${CABINET_ID}:
+    image: redis:7-alpine
+    container_name: predykt-redis-cabinet-${CABINET_ID}
+    restart: unless-stopped
+
+    ports:
+      - "${REDIS_PORT}:6379"
+
+    volumes:
+      - redis-data-cabinet-${CABINET_ID}:/data
+
+    networks:
+      - predykt-network-cabinet-${CABINET_ID}
+
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # PgAdmin pour le cabinet
+  pgadmin-cabinet:
+    image: dpage/pgadmin4:latest
+    container_name: predykt-pgadmin-cabinet-${CABINET_ID}
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@${CABINET_DOMAIN}}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+
+    ports:
+      - "${PGADMIN_PORT}:80"
+
+    volumes:
+      - pgadmin-data-cabinet-${CABINET_ID}:/var/lib/pgadmin
+
+    networks:
+      - predykt-network-cabinet-${CABINET_ID}
+
+    depends_on:
+      - postgres-cabinet-${CABINET_ID}
+
+  # Backup automatique
+  backup-cabinet:
+    image: prodrigestivill/postgres-backup-local
+    container_name: predykt-backup-cabinet-${CABINET_ID}
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_HOST: postgres-cabinet-${CABINET_ID}
+      POSTGRES_DB: predykt_cabinet_${CABINET_ID}
+      POSTGRES_USER: predykt_cabinet_${CABINET_ID}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 30
+      BACKUP_KEEP_WEEKS: 8
+      BACKUP_KEEP_MONTHS: 12
+      HEALTHCHECK_PORT: 8080
+
+    volumes:
+      - ./backups/cabinet-${CABINET_ID}/postgres:/backups
+
+    networks:
+      - predykt-network-cabinet-${CABINET_ID}
+
+    depends_on:
+      - postgres-cabinet-${CABINET_ID}
+
+volumes:
+  postgres-data-cabinet-${CABINET_ID}:
+    driver: local
+  redis-data-cabinet-${CABINET_ID}:
+    driver: local
+  pgadmin-data-cabinet-${CABINET_ID}:
+    driver: local
+
+networks:
+  predykt-network-cabinet-${CABINET_ID}:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.${CABINET_SUBNET_OCTET:-30}.0.0/16

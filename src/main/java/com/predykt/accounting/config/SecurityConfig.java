@@ -3,13 +3,19 @@ package com.predykt.accounting.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import com.predykt.accounting.security.JwtAuthenticationFilter;
 
 import java.util.Arrays;
 import java.util.List;
@@ -28,24 +34,37 @@ public class SecurityConfig {
             .sessionManagement(session -> 
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Endpoints publics
-                .requestMatchers("/health/**", "/actuator/**").permitAll()
-                .requestMatchers("/swagger-ui/**", "/api-docs/**").permitAll()
+                // // Endpoints publics
+                // .requestMatchers("/health/**", "/actuator/**").permitAll()
+                // .requestMatchers("/swagger-ui/**", "/api-docs/**").permitAll()
                 
-                // Endpoints protégés (Phase 2: ajouter JWT)
-                .requestMatchers(HttpMethod.POST, "/companies").permitAll() // MVP: création libre
-                .anyRequest().authenticated()
+                // // Endpoints protégés (Phase 2: ajouter JWT)
+                // .requestMatchers(HttpMethod.POST, "/companies").permitAll() // MVP: création libre
+                // .anyRequest().authenticated()
+                .anyRequest().permitAll()
+
             );
-        
+
         return http.build();
     }
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        // C'est cette méthode qui expose le AuthenticationManager
+        return config.getAuthenticationManager();
+    }
     
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12); 
+    }
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(
             "http://localhost:3000",  // Frontend Next.js
-            "http://localhost:8000"   // Backend Python
+            "http://localhost:8000",
+            "http://localhost:8080",
+            "http://localhost"   // Backend Python
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));

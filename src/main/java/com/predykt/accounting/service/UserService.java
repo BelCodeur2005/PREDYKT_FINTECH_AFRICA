@@ -201,6 +201,11 @@ public class UserService {
         
         log.info("🔑 Mot de passe changé pour: {}", user.getEmail());
     }
+
+    public void activateUser(Long companyId, Long userId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'activateUser'");
+    }
 }
 
 

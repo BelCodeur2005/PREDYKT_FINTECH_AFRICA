@@ -1,0 +1,255 @@
+version: '3.8'
+
+################################################################################
+# Docker Compose - Mode SHARED (Production Multi-Tenant)
+# Usage: docker-compose -f docker-compose.shared.yml up -d
+#
+# Description:
+# - Toutes les PME partagent la même base de données
+# - Isolation au niveau ligne (company_id)
+# - Optimisé pour grande scalabilité horizontale
+################################################################################
+
+services:
+  # Application Spring Boot (mode SHARED)
+  predykt-app:
+    image: predykt/accounting:${VERSION:-latest}
+    container_name: predykt-app-shared
+    restart: unless-stopped
+
+    environment:
+      # Configuration Multi-Tenant SHARED
+      PREDYKT_TENANT_MODE: SHARED
+      SPRING_PROFILES_ACTIVE: shared
+
+      # Base de données partagée
+      DB_HOST: postgres-shared
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-predykt_db}
+      DB_USER: ${DB_USER:-predykt}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      # Redis partagé avec namespacing par company_id
+      REDIS_HOST: redis-shared
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+      # JWT (clé partagée pour tous les tenants)
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+
+      # Configuration JVM optimisée pour production
+      JAVA_OPTS: >-
+        -Xms1024m
+        -Xmx4096m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+        -XX:+UseStringDeduplication
+        -XX:+ParallelRefProcEnabled
+        -Dspring.datasource.hikari.maximum-pool-size=50
+        -Dspring.datasource.hikari.minimum-idle=10
+
+      # Timezone
+      TZ: Africa/Douala
+
+      # Monitoring & Observability
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,metrics,prometheus,info
+      MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED: true
+
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+    volumes:
+      - ./logs:/app/logs
+      - ./data/uploads:/app/uploads
+      - ./config:/app/config
+
+    networks:
+      - predykt-network-shared
+
+    depends_on:
+      postgres-shared:
+        condition: service_healthy
+      redis-shared:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # PostgreSQL partagée (toutes les entreprises)
+  postgres-shared:
+    image: postgres:15-alpine
+    container_name: predykt-postgres-shared
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${DB_NAME:-predykt_db}
+      POSTGRES_USER: ${DB_USER:-predykt}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=fr_FR.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    ports:
+      - "${DB_PORT:-5432}:5432"
+
+    volumes:
+      - postgres-data-shared:/var/lib/postgresql/data
+      - ./backups/postgres:/backups
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+
+    networks:
+      - predykt-network-shared
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-predykt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=5242kB
+      -c min_wal_size=2GB
+      -c max_wal_size=8GB
+      -c max_worker_processes=4
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=4
+      -c log_statement=mod
+      -c log_duration=on
+      -c log_min_duration_statement=1000
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+  # Redis partagé (cache par company_id via préfixe)
+  redis-shared:
+    image: redis:7-alpine
+    container_name: predykt-redis-shared
+    restart: unless-stopped
+
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+    volumes:
+      - redis-data-shared:/data
+
+    networks:
+      - predykt-network-shared
+
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --tcp-backlog 511
+      --timeout 300
+      --tcp-keepalive 60
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # PgAdmin (interface de gestion DB)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: predykt-pgadmin-shared
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@predykt.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'True'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'True'
+
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+
+    volumes:
+      - pgadmin-data-shared:/var/lib/pgadmin
+
+    networks:
+      - predykt-network-shared
+
+    depends_on:
+      - postgres-shared
+
+  # Backup automatique PostgreSQL
+  backup:
+    image: prodrigestivill/postgres-backup-local
+    container_name: predykt-backup-shared
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_HOST: postgres-shared
+      POSTGRES_DB: ${DB_NAME:-predykt_db}
+      POSTGRES_USER: ${DB_USER:-predykt}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      SCHEDULE: "@daily"  # Backup quotidien à minuit
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 6
+      HEALTHCHECK_PORT: 8080
+
+    volumes:
+      - ./backups/postgres:/backups
+
+    networks:
+      - predykt-network-shared
+
+    depends_on:
+      - postgres-shared
+
+volumes:
+  postgres-data-shared:
+    driver: local
+  redis-data-shared:
+    driver: local
+  pgadmin-data-shared:
+    driver: local
+
+networks:
+  predykt-network-shared:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

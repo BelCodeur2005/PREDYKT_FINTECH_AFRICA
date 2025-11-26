@@ -204,4 +204,14 @@ public class JwtTokenProvider {
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
     }
+
+    // Ajouter méthode pour extraire claims custom
+   public Object getClaim(String token, String claimName) {
+       Claims claims = Jwts.parserBuilder()
+           .setSigningKey(getSigningKey())
+           .build()
+           .parseClaimsJws(token)
+           .getBody();
+       return claims.get(claimName);
+   }
 }

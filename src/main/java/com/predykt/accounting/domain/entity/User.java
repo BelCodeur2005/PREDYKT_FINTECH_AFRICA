@@ -27,8 +27,8 @@ import java.util.stream.Collectors;
            @Index(name = "idx_users_active", columnList = "is_active")
        })
 @Data
-@EqualsAndHashCode(callSuper = true, exclude = {"roles", "sessions"})
-@ToString(exclude = {"passwordHash", "roles", "sessions"})
+@EqualsAndHashCode(callSuper = true, exclude = {"roles", "sessions", "tokens", "companyAccesses", "cabinet"})
+@ToString(exclude = {"passwordHash", "roles", "sessions", "tokens", "companyAccesses", "cabinet"})
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -101,14 +101,26 @@ public class User extends BaseEntity implements UserDetails {
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<UserSession> sessions = new HashSet<>();
-    
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private Set<JwtToken> tokens = new HashSet<>();
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private Set<UserCompanyAccess> companyAccesses = new HashSet<>();
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cabinet_id")
+    private Cabinet cabinet;
+
     // ========== IMPLÉMENTATION UserDetails ==========
     
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return roles.stream()
             .flatMap(role -> role.getPermissions().stream())
-            .map(permission -> new SimpleGrantedAuthority(permission.getCode()))
+            .map(permission -> new SimpleGrantedAuthority(permission.getPermissionCode()))
             .collect(Collectors.toSet());
     }
     
@@ -172,7 +184,7 @@ public class User extends BaseEntity implements UserDetails {
     public boolean hasPermission(String permissionCode) {
         return roles.stream()
             .flatMap(role -> role.getPermissions().stream())
-            .anyMatch(permission -> permission.getCode().equals(permissionCode));
+            .anyMatch(permission -> permission.getPermissionCode().equals(permissionCode));
     }
     
     /**
@@ -199,5 +211,38 @@ public class User extends BaseEntity implements UserDetails {
     public void recordSuccessfulLogin() {
         this.lastLoginAt = LocalDateTime.now();
         resetFailedLoginAttempts();
+    }
+
+    /**
+     * Vérifie si l'utilisateur appartient à un cabinet (MODE CABINET)
+     */
+    public boolean isCabinetUser() {
+        return cabinet != null;
+    }
+
+    /**
+     * Vérifie si l'utilisateur a accès à un dossier client spécifique
+     */
+    public boolean hasAccessToCompany(Long companyId) {
+        return companyAccesses.stream()
+            .anyMatch(access -> access.getCompany().getId().equals(companyId));
+    }
+
+    /**
+     * Vérifie si l'utilisateur peut écrire dans un dossier client
+     */
+    public boolean canWriteToCompany(Long companyId) {
+        return companyAccesses.stream()
+            .filter(access -> access.getCompany().getId().equals(companyId))
+            .anyMatch(UserCompanyAccess::canWrite);
+    }
+
+    /**
+     * Vérifie si l'utilisateur est admin d'un dossier client
+     */
+    public boolean isCompanyAdmin(Long companyId) {
+        return companyAccesses.stream()
+            .filter(access -> access.getCompany().getId().equals(companyId))
+            .anyMatch(UserCompanyAccess::isAdmin);
     }
 }

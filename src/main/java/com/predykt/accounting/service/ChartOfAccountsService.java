@@ -148,4 +148,19 @@ public class ChartOfAccountsService {
         
         return chartRepository.save(account);
     }
+
+    public void activateAccount(Long companyId, Long accountId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'activateAccount'");
+    }
+
+    public void desactivateAccount(Long companyId, Long accountId) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'desactivateAccount'");
+    }
+
+    public List<ChartOfAccounts> searchAccounts(Long companyId, String query) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'searchAccounts'");
+    }
 }

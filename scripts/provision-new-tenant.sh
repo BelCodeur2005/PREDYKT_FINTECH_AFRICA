@@ -128,8 +128,10 @@ JWT_SECRET=${JWT_SECRET}
 # Version de l'application
 VERSION=latest
 
-# Environnement
-SPRING_PROFILES_ACTIVE=prod-tenant
+# Environnement (utilise le profil "dedicated" défini dans application.yaml)
+SPRING_PROFILES_ACTIVE=dedicated
+PREDYKT_TENANT_MODE=DEDICATED
+PREDYKT_TENANT_ID=${TENANT_ID}
 
 # Monitoring
 MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,metrics,prometheus
