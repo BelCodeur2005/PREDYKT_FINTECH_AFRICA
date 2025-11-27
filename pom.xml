@@ -115,7 +115,14 @@
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
-        
+
+        <!-- Hypersistence Utils pour JSONB PostgreSQL -->
+        <dependency>
+            <groupId>io.hypersistence</groupId>
+            <artifactId>hypersistence-utils-hibernate-63</artifactId>
+            <version>3.7.0</version>
+        </dependency>
+
         <!-- ========== HTTP CLIENT (pour Python API) ========== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -76,4 +76,8 @@ public class Company extends BaseEntity {
     @Column(name = "is_vat_registered")
     @Builder.Default
     private Boolean isVatRegistered = false;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cabinet_id")
+    private Cabinet cabinet;
 }

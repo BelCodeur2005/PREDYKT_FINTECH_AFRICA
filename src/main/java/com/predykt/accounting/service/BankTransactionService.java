@@ -3,21 +3,22 @@ package com.predykt.accounting.service;
 import com.predykt.accounting.domain.entity.BankTransaction;
 import com.predykt.accounting.domain.entity.Company;
 import com.predykt.accounting.domain.entity.GeneralLedger;
+import com.predykt.accounting.domain.enums.BankProvider;
+import com.predykt.accounting.dto.request.BankTransactionImportDto;
+import com.predykt.accounting.exception.ImportException;
 import com.predykt.accounting.exception.ResourceNotFoundException;
 import com.predykt.accounting.repository.BankTransactionRepository;
 import com.predykt.accounting.repository.CompanyRepository;
 import com.predykt.accounting.repository.GeneralLedgerRepository;
+import com.predykt.accounting.service.parser.BankStatementParser;
+import com.predykt.accounting.service.parser.BankStatementParserFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,72 +26,100 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class BankTransactionService {
-    
+
     private final BankTransactionRepository transactionRepository;
     private final CompanyRepository companyRepository;
     private final GeneralLedgerRepository glRepository;
+    private final BankStatementParserFactory parserFactory;
     
     /**
-     * Importer des transactions depuis un fichier CSV
+     * Importer des transactions depuis un fichier (tous formats supportés)
+     * Formats supportés: OFX, MT940, CAMT.053, QIF, CSV
+     *
+     * @param companyId ID de l'entreprise
+     * @param file Fichier à importer
+     * @param bankProvider Banque émettrice (optionnel, aide à la détection du format)
+     * @return Liste des transactions importées
+     */
+    @Transactional
+    public List<BankTransaction> importTransactions(Long companyId, MultipartFile file, BankProvider bankProvider) {
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée"));
+
+        if (file.isEmpty()) {
+            throw new ImportException("Le fichier est vide");
+        }
+
+        String fileName = file.getOriginalFilename();
+        String contentType = file.getContentType();
+
+        log.info("Importing bank transactions from file: {} (type: {}, provider: {})",
+            fileName, contentType, bankProvider != null ? bankProvider.getDisplayName() : "auto-detect");
+
+        try {
+            // Sélectionner le parser approprié
+            BankStatementParser parser = parserFactory.getParser(fileName, contentType, bankProvider);
+
+            // Parser le fichier
+            List<BankTransactionImportDto> importDtos = parser.parse(file);
+            log.info("Parsed {} transactions from file", importDtos.size());
+
+            // Convertir en BankTransaction et sauvegarder
+            List<BankTransaction> transactions = new ArrayList<>();
+            int duplicateCount = 0;
+
+            for (BankTransactionImportDto dto : importDtos) {
+                // Vérifier les doublons par référence bancaire
+                if (dto.getBankReference() != null &&
+                    transactionRepository.existsByCompanyAndBankReference(company, dto.getBankReference())) {
+                    log.debug("Duplicate transaction ignored: {}", dto.getBankReference());
+                    duplicateCount++;
+                    continue;
+                }
+
+                // Créer la transaction
+                BankTransaction transaction = BankTransaction.builder()
+                    .company(company)
+                    .transactionDate(dto.getTransactionDate())
+                    .valueDate(dto.getValueDate())
+                    .amount(dto.getAmount())
+                    .description(dto.getDescription())
+                    .bankReference(dto.getBankReference())
+                    .thirdPartyName(dto.getThirdPartyName())
+                    .isReconciled(false)
+                    .importedAt(LocalDate.now())
+                    .importSource(parser.getFormatName())
+                    .build();
+
+                transactions.add(transactionRepository.save(transaction));
+            }
+
+            log.info("Import completed: {} transactions saved, {} duplicates ignored",
+                transactions.size(), duplicateCount);
+
+            return transactions;
+
+        } catch (Exception e) {
+            log.error("Error importing bank transactions from file: {}", fileName, e);
+            throw new ImportException("Échec de l'import: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Import avec détection automatique du format (sans bankProvider)
      */
     @Transactional
     public List<BankTransaction> importTransactions(Long companyId, MultipartFile file, String format) {
-        Company company = companyRepository.findById(companyId)
-            .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée"));
-        
-        if (file.isEmpty()) {
-            throw new IllegalArgumentException("Le fichier est vide");
-        }
-        
-        List<BankTransaction> transactions = new ArrayList<>();
-        
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream()))) {
-            String line;
-            boolean isHeader = true;
-            
-            while ((line = reader.readLine()) != null) {
-                if (isHeader) {
-                    isHeader = false;
-                    continue; // Ignorer la ligne d'en-tête
-                }
-                
-                String[] fields = line.split(",");
-                
-                if (fields.length < 3) {
-                    log.warn("Ligne CSV invalide ignorée: {}", line);
-                    continue;
-                }
-                
-                BankTransaction transaction = BankTransaction.builder()
-                    .company(company)
-                    .transactionDate(parseDate(fields[0]))
-                    .amount(new BigDecimal(fields[1].trim()))
-                    .description(fields.length > 2 ? fields[2].trim() : "")
-                    .bankReference(fields.length > 3 ? fields[3].trim() : null)
-                    .isReconciled(false)
-                    .importedAt(LocalDate.now())
-                    .importSource("CSV")
-                    .build();
-                
-                // Vérifier les doublons
-                if (transaction.getBankReference() != null 
-                    && transactionRepository.existsByCompanyAndBankReference(company, transaction.getBankReference())) {
-                    log.warn("Transaction en doublon ignorée: {}", transaction.getBankReference());
-                    continue;
-                }
-                
-                transactions.add(transactionRepository.save(transaction));
+        // Convertir le format string en BankProvider si possible
+        BankProvider provider = null;
+        if (format != null && !format.isEmpty()) {
+            try {
+                provider = BankProvider.valueOf(format.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.debug("Format '{}' is not a bank provider, will auto-detect", format);
             }
-            
-            log.info("Import réussi: {} transactions importées pour l'entreprise {}", 
-                     transactions.size(), companyId);
-            
-        } catch (Exception e) {
-            log.error("Erreur lors de l'import des transactions", e);
-            throw new RuntimeException("Échec de l'import: " + e.getMessage());
         }
-        
-        return transactions;
+        return importTransactions(companyId, file, provider);
     }
     
     public List<BankTransaction> getTransactionsByDateRange(Long companyId, 
@@ -129,27 +158,4 @@ public class BankTransactionService {
         log.info("Transaction {} réconciliée avec l'écriture {}", transactionId, glEntryId);
     }
     
-    private LocalDate parseDate(String dateStr) {
-        try {
-            // Essayer plusieurs formats de date courants
-            DateTimeFormatter[] formatters = {
-                DateTimeFormatter.ofPattern("yyyy-MM-dd"),
-                DateTimeFormatter.ofPattern("dd/MM/yyyy"),
-                DateTimeFormatter.ofPattern("MM/dd/yyyy")
-            };
-            
-            for (DateTimeFormatter formatter : formatters) {
-                try {
-                    return LocalDate.parse(dateStr.trim(), formatter);
-                } catch (Exception ignored) {
-                }
-            }
-            
-            throw new IllegalArgumentException("Format de date non reconnu: " + dateStr);
-            
-        } catch (Exception e) {
-            log.error("Erreur lors du parsing de la date: {}", dateStr);
-            throw e;
-        }
-    }
 }

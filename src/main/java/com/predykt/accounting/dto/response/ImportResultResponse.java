@@ -20,4 +20,5 @@ public class ImportResultResponse {
     private Integer errorCount;
     private String message;
     private List<String> errors;
+    private Object data;  // For additional data like PreviewResponse
 }

@@ -86,15 +86,15 @@ public class ImportedActivityService {
      * Trouve le meilleur compte OHADA correspondant à une activité
      */
     private ChartOfAccounts findBestAccountMatch(ImportedActivity activity) {
-        Long companyId = activity.getCompany().getId();
+        Company company = activity.getCompany();
         String description = activity.getDescription().toLowerCase();
 
         // Rechercher par mots-clés dans la description
-        List<ChartOfAccounts> accounts = chartOfAccountsRepository.findByCompanyId(companyId);
+        List<ChartOfAccounts> accounts = chartOfAccountsRepository.findByCompanyAndIsActiveTrue(company);
 
         return accounts.stream()
             .filter(account -> {
-                String accountName = account.getName().toLowerCase();
+                String accountName = account.getAccountName().toLowerCase();
                 String[] keywords = description.split("\\s+");
 
                 // Vérifier si au moins 2 mots-clés correspondent
@@ -115,7 +115,7 @@ public class ImportedActivityService {
      */
     private BigDecimal calculateConfidence(ImportedActivity activity, ChartOfAccounts account) {
         String description = activity.getDescription().toLowerCase();
-        String accountName = account.getName().toLowerCase();
+        String accountName = account.getAccountName().toLowerCase();
 
         String[] keywords = description.split("\\s+");
         long matchCount = 0;

@@ -28,8 +28,6 @@ public interface CabinetMapper {
     @Mapping(target = "companies", ignore = true)
     @Mapping(target = "users", ignore = true)
     @Mapping(target = "invoices", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
     Cabinet toEntity(CabinetDTO dto);
 
     /**
@@ -45,7 +43,5 @@ public interface CabinetMapper {
     @Mapping(target = "companies", ignore = true)
     @Mapping(target = "users", ignore = true)
     @Mapping(target = "invoices", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
     void updateEntityFromDTO(CabinetDTO dto, @MappingTarget Cabinet cabinet);
 }

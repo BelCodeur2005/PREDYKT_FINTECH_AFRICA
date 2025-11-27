@@ -30,11 +30,6 @@ public interface CabinetInvoiceMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "cabinet", ignore = true)
     @Mapping(target = "paidAt", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    @Mapping(target = "createdBy", ignore = true)
-    @Mapping(target = "updatedBy", ignore = true)
-    @Mapping(target = "version", ignore = true)
     CabinetInvoice toEntity(CabinetInvoiceDTO dto);
 
     /**
@@ -51,11 +46,6 @@ public interface CabinetInvoiceMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "paidAt", ignore = true)
     @Mapping(target = "paymentMethod", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    @Mapping(target = "createdBy", ignore = true)
-    @Mapping(target = "updatedBy", ignore = true)
-    @Mapping(target = "version", ignore = true)
     void updateEntityFromDTO(CabinetInvoiceDTO dto, @MappingTarget CabinetInvoice invoice);
 
     /**

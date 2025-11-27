@@ -29,6 +29,9 @@ public class Cabinet extends BaseEntity {
     @Column(nullable = false, length = 200)
     private String name;
 
+    @Column(name = "code", unique = true, length = 50)
+    private String code;
+
     @Column(name = "tax_id", unique = true, length = 50)
     private String taxId;
 
