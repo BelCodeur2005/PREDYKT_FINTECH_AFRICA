@@ -90,4 +90,12 @@ public interface GeneralLedgerRepository extends JpaRepository<GeneralLedger, Lo
         LocalDate startDate,
         LocalDate endDate
     );
+
+    // Recherche par compte et periode
+    List<GeneralLedger> findByCompanyAndAccountAndEntryDateBetween(
+        Company company,
+        ChartOfAccounts account,
+        LocalDate startDate,
+        LocalDate endDate
+    );
 }

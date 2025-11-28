@@ -20,10 +20,21 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class FinancialReportService {
-    
+
     private final CompanyRepository companyRepository;
     private final GeneralLedgerService glService;
     private final ChartOfAccountsService chartService;
+    private final com.predykt.accounting.repository.FinancialRatioRepository financialRatioRepository;
+    private final com.predykt.accounting.repository.GeneralLedgerRepository generalLedgerRepository;
+
+    // Getters pour export
+    public com.predykt.accounting.repository.FinancialRatioRepository getFinancialRatioRepository() {
+        return financialRatioRepository;
+    }
+
+    public com.predykt.accounting.repository.GeneralLedgerRepository getGeneralLedgerRepository() {
+        return generalLedgerRepository;
+    }
     
     /**
      * Générer le Bilan (Balance Sheet)
