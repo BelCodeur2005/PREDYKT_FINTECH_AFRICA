@@ -10,6 +10,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -171,5 +173,213 @@ public interface BankReconciliationSuggestionRepository extends JpaRepository<Ba
     boolean existsPendingSuggestionForGLEntry(
         @Param("reconciliation") BankReconciliation reconciliation,
         @Param("glEntryId") Long glEntryId
+    );
+
+    // ========== NOUVEAUX ENDPOINTS : MÉTRIQUES DU DASHBOARD ==========
+
+    /**
+     * Trouve toutes les suggestions d'une entreprise sur une période
+     * (pour les métriques et analyses)
+     */
+    @Query("SELECT s FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "ORDER BY s.createdAt DESC")
+    List<BankReconciliationSuggestion> findByCompanyAndDateRange(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Trouve les suggestions par entreprise, période et statut
+     */
+    @Query("SELECT s FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "AND s.status = :status " +
+           "ORDER BY s.createdAt DESC")
+    List<BankReconciliationSuggestion> findByCompanyAndDateRangeAndStatus(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate,
+        @Param("status") SuggestionStatus status
+    );
+
+    /**
+     * Compte les suggestions par statut pour une entreprise sur une période
+     */
+    @Query("SELECT s.status, COUNT(s) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "GROUP BY s.status")
+    List<Object[]> countByStatusForCompanyAndPeriod(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Calcule le score de confiance moyen pour une entreprise sur une période
+     */
+    @Query("SELECT AVG(s.confidenceScore) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate")
+    Optional<BigDecimal> calculateAverageConfidenceScoreForPeriod(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Trouve les suggestions rejetées avec raison pour une entreprise (analyse)
+     */
+    @Query("SELECT s FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "AND s.status = 'REJECTED' " +
+           "AND s.rejectionReason IS NOT NULL " +
+           "ORDER BY s.updatedAt DESC")
+    List<BankReconciliationSuggestion> findRejectedWithReasonForPeriod(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Groupe les rejets par raison avec comptage
+     * (Top raisons de rejet)
+     */
+    @Query("SELECT s.rejectionReason, COUNT(s) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "AND s.status = 'REJECTED' " +
+           "AND s.rejectionReason IS NOT NULL " +
+           "GROUP BY s.rejectionReason " +
+           "ORDER BY COUNT(s) DESC")
+    List<Object[]> groupRejectionsByReason(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Groupe les suggestions par type avec statistiques
+     * (Type de transaction, nombre généré, appliqué, rejeté)
+     */
+    @Query("SELECT s.suggestedItemType, s.status, COUNT(s), AVG(s.confidenceScore) " +
+           "FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "GROUP BY s.suggestedItemType, s.status " +
+           "ORDER BY s.suggestedItemType, s.status")
+    List<Object[]> groupByTypeAndStatus(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Trouve les suggestions par niveau de confiance
+     * (Distribution par tranches : EXCELLENT, GOOD, FAIR, LOW)
+     */
+    @Query("SELECT " +
+           "CASE " +
+           "  WHEN s.confidenceScore >= 95 THEN 'EXCELLENT' " +
+           "  WHEN s.confidenceScore >= 80 THEN 'GOOD' " +
+           "  WHEN s.confidenceScore >= 70 THEN 'FAIR' " +
+           "  ELSE 'LOW' " +
+           "END as confidenceLevel, " +
+           "s.status, " +
+           "COUNT(s), " +
+           "AVG(s.confidenceScore) " +
+           "FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "GROUP BY " +
+           "CASE " +
+           "  WHEN s.confidenceScore >= 95 THEN 'EXCELLENT' " +
+           "  WHEN s.confidenceScore >= 80 THEN 'GOOD' " +
+           "  WHEN s.confidenceScore >= 70 THEN 'FAIR' " +
+           "  ELSE 'LOW' " +
+           "END, s.status " +
+           "ORDER BY " +
+           "CASE " +
+           "  WHEN s.confidenceScore >= 95 THEN 1 " +
+           "  WHEN s.confidenceScore >= 80 THEN 2 " +
+           "  WHEN s.confidenceScore >= 70 THEN 3 " +
+           "  ELSE 4 " +
+           "END")
+    List<Object[]> groupByConfidenceLevelAndStatus(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Calcule le nombre de transactions bancaires analysées
+     * (compte les bank transactions distinctes dans les suggestions)
+     */
+    @Query("SELECT COUNT(DISTINCT bt.id) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "JOIN s.bankTransactions bt " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate")
+    long countDistinctBankTransactionsAnalyzed(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Calcule le nombre d'écritures GL analysées
+     * (compte les GL entries distinctes dans les suggestions)
+     */
+    @Query("SELECT COUNT(DISTINCT gl.id) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "JOIN s.glEntries gl " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate")
+    long countDistinctGLEntriesAnalyzed(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Trouve les suggestions par jour (pour time series)
+     */
+    @Query("SELECT CAST(s.createdAt AS date), s.status, COUNT(s) " +
+           "FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate " +
+           "GROUP BY CAST(s.createdAt AS date), s.status " +
+           "ORDER BY CAST(s.createdAt AS date)")
+    List<Object[]> groupByDateAndStatus(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Compte les analyses (rapprochements) effectuées sur la période
+     */
+    @Query("SELECT COUNT(DISTINCT s.reconciliation.id) FROM BankReconciliationSuggestion s " +
+           "JOIN s.reconciliation r " +
+           "WHERE r.company.id = :companyId " +
+           "AND s.createdAt BETWEEN :startDate AND :endDate")
+    long countDistinctReconciliationsWithSuggestions(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDateTime startDate,
+        @Param("endDate") LocalDateTime endDate
     );
 }
