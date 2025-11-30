@@ -164,3 +164,90 @@ spring:
 logging:
   pattern:
     console: "%d{HH:mm:ss.SSS} [🟡CABINET-${PREDYKT_TENANT_CABINET_ID}] [%thread] %-5level %logger{36} - %msg%n"
+
+# ============================================
+# Configuration du matching automatique bancaire
+# ============================================
+predykt:
+  reconciliation:
+    matching:
+      # Seuils de scores de confiance
+      scores:
+        exact-match: 100
+        good-match: 90
+        fair-match: 70
+        low-match: 50
+
+      # Seuils de différence de dates (en jours)
+      date-thresholds:
+        exact-match-days: 0
+        good-match-days: 3
+        fair-match-days: 7
+        low-match-days: 15
+
+      # Tolérance de montant (5% par défaut) - DEPRECATED: utiliser amount-tolerance
+      amount-tolerance-percent: 0.05
+
+      # ========== ✅ NOUVEAU VERSION 2.0: TOLÉRANCE CONTEXTUELLE DES MONTANTS ==========
+      # S'adapte automatiquement selon le montant (gros vs petits)
+      amount-tolerance:
+        small-amount-percent: 0.05      # 5% pour montants < 1M FCFA
+        large-amount-percent: 0.01      # 1% pour montants ≥ 1M FCFA
+        minimum-absolute: 500           # Min 500 FCFA d'écart accepté
+        maximum-absolute: 10000         # Max 10 000 FCFA d'écart accepté
+        large-amount-threshold: 1000000 # Seuil "gros montant" = 1M FCFA
+
+      # Seuil d'auto-approbation (95% de confiance minimum)
+      auto-approve-threshold: 95
+
+      # Configuration du matching multiple (N-à-1 et 1-à-N)
+      multiple-matching:
+        enabled: true
+        min-transactions: 2
+        max-transactions: 5
+        max-date-range-days: 7
+        confidence-score: 75
+
+      # ========== ✅ NOUVEAU VERSION 2.0: CONFIGURATION DE PERFORMANCE ==========
+      # Protège contre l'explosion combinatoire et les timeouts
+      performance:
+        timeout-seconds: 90                       # Timeout global de l'analyse (90s)
+        max-candidates-for-multiple-matching: 30  # Max candidats pour matching multiple
+        max-items-per-phase: 200                  # Max transactions à analyser par phase
+        high-performance-mode: false              # Mode haute perf (sacrifie précision)
+        max-subset-sum-states: 5000               # Limite mémoire subset sum
+
+      # ========== ✅ NOUVEAU VERSION 2.0: SIMILARITÉ TEXTUELLE AVANCÉE ==========
+      text-similarity:
+        algorithm: ADVANCED   # JACCARD | LEVENSHTEIN | JARO_WINKLER | ADVANCED
+        threshold: 0.70       # Seuil pour bonus de points (70%)
+        weight: 5             # Poids dans le score total (5 points)
+        normalize: true       # Normaliser les textes (accents, ponctuation)
+
+      # Heuristiques pour la détection automatique
+      heuristics:
+        virement-keywords:
+          - "virement"
+          - "vir "
+          - "transfer"
+        fees-keywords:
+          - "frais"
+          - "commission"
+          - "fees"
+        interest-keywords:
+          - "intérêt"
+          - "interet"
+          - "interest"
+        agios-keywords:
+          - "agios"
+          - "interet debiteur"
+          - "overdraft"
+        direct-debit-keywords:
+          - "prelevement"
+          - "prel "
+          - "direct debit"
+        cheque-keywords:
+          - "chq"
+          - "cheque"
+          - "chèque"
+          - "check"

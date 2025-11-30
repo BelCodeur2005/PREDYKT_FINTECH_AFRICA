@@ -1,0 +1,208 @@
+# Configuration du système de matching bancaire intelligent VERSION 2.0
+# Ajoutez ces propriétés à votre fichier application.yaml
+
+predykt:
+  reconciliation:
+    matching:
+      # ========== SCORES DE CONFIANCE ==========
+      scores:
+        exactMatch: 100        # Montant + date identiques
+        goodMatch: 90          # Montant exact, date proche (≤3 jours)
+        fairMatch: 70          # Montant proche ou date acceptable (≤7 jours)
+        lowMatch: 50           # Montant proche ou date éloignée (≤15 jours)
+
+      # ========== SEUILS DE DATES ==========
+      dateThresholds:
+        exactMatchDays: 0      # Date identique
+        goodMatchDays: 3       # ≤ 3 jours d'écart
+        fairMatchDays: 7       # ≤ 7 jours d'écart
+        lowMatchDays: 15       # ≤ 15 jours d'écart
+
+      # ========== TOLÉRANCE DE MONTANT (DEPRECATED) ==========
+      # Utilisé uniquement si amountTolerance n'est pas configurée
+      amountTolerancePercent: 0.05  # 5%
+
+      # ========== ✅ NOUVEAU: TOLÉRANCE CONTEXTUELLE DES MONTANTS ==========
+      # S'adapte automatiquement selon le montant (gros vs petits)
+      amountTolerance:
+        smallAmountPercent: 0.05      # 5% pour montants < 1M FCFA
+        largeAmountPercent: 0.01      # 1% pour montants ≥ 1M FCFA
+        minimumAbsolute: 500          # Min 500 FCFA d'écart accepté
+        maximumAbsolute: 10000        # Max 10 000 FCFA d'écart accepté
+        largeAmountThreshold: 1000000 # Seuil "gros montant" = 1M FCFA
+
+      # Exemples de tolérance contextuelle:
+      # - Montant 5 000 F → tolérance = max(5% = 250 F, 500 F min) = 500 F
+      # - Montant 100 000 F → tolérance = 5% = 5 000 F
+      # - Montant 2 000 000 F → tolérance = min(1% = 20 000 F, 10 000 F max) = 10 000 F
+
+      # ========== SEUIL D'AUTO-APPROBATION ==========
+      autoApproveThreshold: 95       # Suggestions ≥95% peuvent être appliquées sans vérification
+
+      # ========== MATCHING MULTIPLE ==========
+      multipleMatching:
+        enabled: true                # Activer/désactiver le matching N-à-1 et 1-à-N
+        minTransactions: 2           # Nombre minimum de transactions pour un match multiple
+        maxTransactions: 5           # Nombre maximum de transactions par combinaison
+        maxDateRangeDays: 7          # Fenêtre temporelle max (en jours) pour regrouper
+        confidenceScore: 75          # Score de confiance pour matching multiple (toujours < 80)
+
+      # ========== ✅ NOUVEAU: CONFIGURATION DE PERFORMANCE ==========
+      # Protège contre l'explosion combinatoire et les timeouts
+      performance:
+        timeoutSeconds: 90                      # Timeout global de l'analyse (90s)
+        maxCandidatesForMultipleMatching: 30    # Max candidats pour matching multiple
+        maxItemsPerPhase: 200                   # Max transactions à analyser par phase
+        highPerformanceMode: false              # Mode haute perf (sacrifie précision)
+        maxSubsetSumStates: 5000                # Limite mémoire subset sum
+
+      # Recommandations selon volume:
+      # - PME (< 50 transactions/mois): valeurs par défaut OK
+      # - ETI (50-200 transactions/mois): maxItemsPerPhase = 200, timeout = 120s
+      # - Grande entreprise (> 200 transactions): diviser en périodes hebdomadaires
+
+      # ========== ✅ NOUVEAU: SIMILARITÉ TEXTUELLE AVANCÉE ==========
+      textSimilarity:
+        algorithm: ADVANCED   # JACCARD | LEVENSHTEIN | JARO_WINKLER | ADVANCED
+        threshold: 0.70       # Seuil pour bonus de points (70%)
+        weight: 5             # Poids dans le score total (5 points)
+        normalize: true       # Normaliser les textes (accents, ponctuation)
+
+      # Algorithmes disponibles:
+      # - JACCARD: Mots communs (rapide mais basique)
+      # - LEVENSHTEIN: Distance d'édition (bon pour fautes de frappe)
+      # - JARO_WINKLER: Excellent pour noms propres et courtes chaînes
+      # - ADVANCED (recommandé): Combinaison optimale
+      #     → Jaro-Winkler 60% + Levenshtein 30% + Contenance 10%
+
+      # ========== HEURISTIQUES (mots-clés pour détection automatique) ==========
+      heuristics:
+        virementKeywords:
+          - "virement"
+          - "vir "
+          - "transfer"
+        feesKeywords:
+          - "frais"
+          - "commission"
+          - "fees"
+        interestKeywords:
+          - "intérêt"
+          - "interet"
+          - "interest"
+        agiosKeywords:
+          - "agios"
+          - "interet debiteur"
+          - "overdraft"
+        directDebitKeywords:
+          - "prelevement"
+          - "prel "
+          - "direct debit"
+        chequeKeywords:
+          - "chq"
+          - "cheque"
+          - "chèque"
+          - "check"
+
+# ========== EXEMPLES DE CONFIGURATION PAR ENVIRONNEMENT ==========
+
+---
+# Profil: DEV (développement)
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+predykt:
+  reconciliation:
+    matching:
+      performance:
+        timeoutSeconds: 30           # Timeout plus court en dev
+        maxItemsPerPhase: 50         # Moins d'items pour tests rapides
+      textSimilarity:
+        algorithm: JACCARD           # Algorithme rapide pour dev
+
+---
+# Profil: PROD - PME (petites entreprises)
+spring:
+  config:
+    activate:
+      on-profile: prod-pme
+
+predykt:
+  reconciliation:
+    matching:
+      performance:
+        timeoutSeconds: 90
+        maxItemsPerPhase: 200
+        maxCandidatesForMultipleMatching: 30
+        highPerformanceMode: false
+      textSimilarity:
+        algorithm: ADVANCED          # Meilleure précision
+
+---
+# Profil: PROD - ETI (grandes entreprises)
+spring:
+  config:
+    activate:
+      on-profile: prod-eti
+
+predykt:
+  reconciliation:
+    matching:
+      performance:
+        timeoutSeconds: 120          # Timeout plus long
+        maxItemsPerPhase: 500        # Plus d'items acceptés
+        maxCandidatesForMultipleMatching: 50
+        highPerformanceMode: false   # Privilégier précision
+      multipleMatching:
+        maxTransactions: 7           # Combinaisons plus grandes
+      textSimilarity:
+        algorithm: ADVANCED
+
+---
+# Profil: PROD - HAUTE PERFORMANCE (sacrifie précision)
+spring:
+  config:
+    activate:
+      on-profile: prod-hp
+
+predykt:
+  reconciliation:
+    matching:
+      performance:
+        timeoutSeconds: 60
+        maxItemsPerPhase: 1000       # Beaucoup de transactions
+        maxCandidatesForMultipleMatching: 20
+        highPerformanceMode: true    # Mode glouton uniquement (pas subset sum)
+      textSimilarity:
+        algorithm: JARO_WINKLER      # Plus rapide qu'ADVANCED
+      multipleMatching:
+        enabled: false               # Désactiver matching multiple pour gain de temps
+
+# ========== NOTES D'UTILISATION ==========
+
+# 1. PERFORMANCE:
+#    - Temps moyen par transaction: 0.5-2 ms en mode standard
+#    - 50 transactions: 2-5 secondes
+#    - 200 transactions: 10-30 secondes
+#    - 500+ transactions: diviser en plusieurs rapprochements
+
+# 2. PRÉCISION:
+#    - ADVANCED (recommandé): 85-95% de précision, temps +20%
+#    - JARO_WINKLER: 80-90% de précision, temps standard
+#    - JACCARD: 70-80% de précision, temps -30%
+
+# 3. MATCHING MULTIPLE:
+#    - Très utile pour paiements groupés mais coûteux
+#    - Limiter maxCandidates si trop lent
+#    - Désactiver si pas nécessaire (enabled: false)
+
+# 4. TOLÉRANCE DE MONTANT:
+#    - Ajuster selon votre contexte métier
+#    - PME: tolérance plus souple (5%)
+#    - Grande entreprise: tolérance stricte (1%)
+
+# 5. TIMEOUT:
+#    - Si timeouts fréquents: diviser les rapprochements
+#    - Exemple: rapprochement hebdomadaire au lieu de mensuel
+
