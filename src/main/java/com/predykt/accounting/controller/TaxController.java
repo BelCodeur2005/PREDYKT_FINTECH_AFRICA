@@ -34,6 +34,7 @@ public class TaxController {
     private final TaxService taxService;
     private final TaxMapper taxMapper;
     private final VATDeclarationService vatDeclarationService;
+    private final VATRecoverabilityService vatRecoverabilityService;
 
     @GetMapping("/summary")
     @Operation(summary = "Résumé fiscal mensuel",
@@ -361,5 +362,82 @@ public class TaxController {
         return ResponseEntity.ok()
             .header("Content-Type", "text/plain; charset=UTF-8")
             .body(report);
+    }
+
+    // ============================================
+    // ENDPOINTS TVA RÉCUPÉRABLE / NON RÉCUPÉRABLE
+    // ============================================
+
+    @GetMapping("/vat-recoverability/transactions")
+    @Operation(summary = "Transactions de TVA avec récupérabilité",
+               description = "Récupère toutes les transactions de TVA pour une période avec leur catégorie de récupérabilité")
+    public ResponseEntity<ApiResponse<List<com.predykt.accounting.domain.entity.VATTransaction>>> getVATTransactions(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        List<com.predykt.accounting.domain.entity.VATTransaction> transactions =
+            vatRecoverabilityService.getTransactionsByPeriod(companyId, startDate, endDate);
+
+        return ResponseEntity.ok(ApiResponse.success(transactions));
+    }
+
+    @GetMapping("/vat-recoverability/non-recoverable")
+    @Operation(summary = "Transactions avec TVA non récupérable",
+               description = "Récupère les transactions ayant de la TVA non récupérable (véhicules tourisme, carburant VP, etc.)")
+    public ResponseEntity<ApiResponse<List<com.predykt.accounting.domain.entity.VATTransaction>>> getNonRecoverableTransactions(
+            @PathVariable Long companyId) {
+
+        List<com.predykt.accounting.domain.entity.VATTransaction> transactions =
+            vatRecoverabilityService.getNonRecoverableTransactions(companyId);
+
+        return ResponseEntity.ok(ApiResponse.success(transactions));
+    }
+
+    @GetMapping("/vat-recoverability/statistics")
+    @Operation(summary = "Statistiques TVA non récupérable",
+               description = "Statistiques détaillées de la TVA non récupérable par catégorie (véhicules, carburant, etc.)")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getNonRecoverableVATStatistics(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        Map<String, Object> statistics =
+            vatRecoverabilityService.getNonRecoverableVATStatistics(companyId, startDate, endDate);
+
+        return ResponseEntity.ok(ApiResponse.success(statistics));
+    }
+
+    @PutMapping("/vat-recoverability/transactions/{transactionId}/category")
+    @Operation(summary = "Modifier la catégorie de récupérabilité",
+               description = "Modifie la catégorie de récupérabilité d'une transaction (correction manuelle)")
+    public ResponseEntity<ApiResponse<com.predykt.accounting.domain.entity.VATTransaction>> updateRecoverableCategory(
+            @PathVariable Long companyId,
+            @PathVariable Long transactionId,
+            @RequestParam com.predykt.accounting.domain.enums.VATRecoverableCategory category,
+            @RequestParam(required = false) String justification) {
+
+        com.predykt.accounting.domain.entity.VATTransaction transaction =
+            vatRecoverabilityService.updateRecoverableCategory(transactionId, category, justification);
+
+        return ResponseEntity.ok(ApiResponse.success(transaction));
+    }
+
+    @GetMapping("/vat-recoverability/alerts/count")
+    @Operation(summary = "Nombre d'alertes TVA récupérabilité",
+               description = "Compte le nombre de transactions avec alertes de récupérabilité")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> countRecoverabilityAlerts(
+            @PathVariable Long companyId) {
+
+        Long count = vatRecoverabilityService.countTransactionsWithAlerts(companyId);
+
+        Map<String, Object> result = Map.of(
+            "alertCount", count,
+            "message", count > 0
+                ? String.format("⚠️ %d transaction(s) avec TVA non/partiellement récupérable", count)
+                : "✅ Toutes les transactions ont une TVA 100% récupérable"
+        );
+
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 }

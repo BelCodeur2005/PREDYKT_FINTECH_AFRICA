@@ -29,6 +29,7 @@ public class VATDeclarationService {
     private final CompanyRepository companyRepository;
     private final VATDeclarationRepository vatDeclarationRepository;
     private final GeneralLedgerRepository generalLedgerRepository;
+    private final VATTransactionRepository vatTransactionRepository;
 
     /**
      * Génère une déclaration de TVA mensuelle (CA3)
@@ -111,8 +112,16 @@ public class VATDeclarationService {
 
     /**
      * Calcule le solde d'un compte TVA pour une période
+     * NOUVELLE VERSION : Utilise VATTransactionRepository pour prendre en compte la récupérabilité
      */
     private BigDecimal calculateVATByAccount(Company company, LocalDate startDate, LocalDate endDate, String accountNumber) {
+        // Si des transactions VAT existent, les utiliser (elles prennent en compte la récupérabilité)
+        BigDecimal fromVatTransactions = calculateVATFromTransactions(company, startDate, endDate, accountNumber);
+        if (fromVatTransactions != null && fromVatTransactions.compareTo(BigDecimal.ZERO) > 0) {
+            return fromVatTransactions;
+        }
+
+        // Sinon, fallback sur l'ancien système (grand livre direct)
         List<GeneralLedger> entries = generalLedgerRepository
             .findByCompanyAndAccountNumberAndEntryDateBetween(company, accountNumber, startDate, endDate);
 
@@ -131,6 +140,26 @@ public class VATDeclarationService {
         }
 
         return total;
+    }
+
+    /**
+     * Calcule la TVA à partir des transactions enregistrées (avec récupérabilité)
+     * IMPORTANT : Utilise uniquement la TVA RÉCUPÉRABLE pour les comptes déductibles
+     */
+    private BigDecimal calculateVATFromTransactions(Company company, LocalDate startDate, LocalDate endDate, String accountNumber) {
+        // Mapper le numéro de compte au VATAccountType
+        String vatAccountType = accountNumber;
+
+        BigDecimal amount = vatTransactionRepository.sumRecoverableVatByAccountType(
+            company, startDate, endDate, vatAccountType
+        );
+
+        if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+            log.debug("✅ TVA récupérable pour compte {} : {} XAF (période {} à {})",
+                accountNumber, amount, startDate, endDate);
+        }
+
+        return amount != null ? amount : BigDecimal.ZERO;
     }
 
     /**
