@@ -1,15 +1,23 @@
 package com.predykt.accounting.controller;
 
+import com.predykt.accounting.domain.entity.RecoverabilityRule;
 import com.predykt.accounting.domain.entity.TaxCalculation;
 import com.predykt.accounting.domain.entity.TaxConfiguration;
 import com.predykt.accounting.domain.enums.TaxType;
+import com.predykt.accounting.domain.enums.VATRecoverableCategory;
 import com.predykt.accounting.dto.response.*;
 import com.predykt.accounting.mapper.TaxMapper;
+import com.predykt.accounting.repository.RecoverabilityRuleRepository;
 import com.predykt.accounting.service.TaxService;
+import com.predykt.accounting.service.VATDeclarationService;
+import com.predykt.accounting.service.VATRecoverabilityRuleEngine;
+import com.predykt.accounting.service.VATRecoverabilityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,6 +43,8 @@ public class TaxController {
     private final TaxMapper taxMapper;
     private final VATDeclarationService vatDeclarationService;
     private final VATRecoverabilityService vatRecoverabilityService;
+    private final VATRecoverabilityRuleEngine ruleEngine;
+    private final RecoverabilityRuleRepository ruleRepository;
 
     @GetMapping("/summary")
     @Operation(summary = "Résumé fiscal mensuel",
@@ -437,6 +447,184 @@ public class TaxController {
                 ? String.format("⚠️ %d transaction(s) avec TVA non/partiellement récupérable", count)
                 : "✅ Toutes les transactions ont une TVA 100% récupérable"
         );
+
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    // ============================================
+    // ENDPOINTS ADMINISTRATION DES RÈGLES DE DÉTECTION
+    // ============================================
+
+    @GetMapping("/vat-recoverability/rules")
+    @Operation(summary = "Liste des règles de détection",
+               description = "Récupère toutes les règles de détection de récupérabilité TVA (actives et inactives)")
+    public ResponseEntity<ApiResponse<List<RecoverabilityRule>>> getAllRules(
+            @PathVariable Long companyId) {
+
+        List<RecoverabilityRule> rules = ruleRepository.findAll();
+        return ResponseEntity.ok(ApiResponse.success(rules));
+    }
+
+    @GetMapping("/vat-recoverability/rules/active")
+    @Operation(summary = "Règles actives par priorité",
+               description = "Récupère toutes les règles actives triées par priorité croissante")
+    public ResponseEntity<ApiResponse<List<RecoverabilityRule>>> getActiveRules(
+            @PathVariable Long companyId) {
+
+        List<RecoverabilityRule> rules = ruleRepository.findByIsActiveTrueOrderByPriorityAsc();
+        return ResponseEntity.ok(ApiResponse.success(rules));
+    }
+
+    @GetMapping("/vat-recoverability/rules/category/{category}")
+    @Operation(summary = "Règles par catégorie",
+               description = "Récupère les règles actives pour une catégorie spécifique")
+    public ResponseEntity<ApiResponse<List<RecoverabilityRule>>> getRulesByCategory(
+            @PathVariable Long companyId,
+            @PathVariable VATRecoverableCategory category) {
+
+        List<RecoverabilityRule> rules = ruleRepository.findByIsActiveTrueAndCategoryOrderByPriorityAsc(category);
+        return ResponseEntity.ok(ApiResponse.success(rules));
+    }
+
+    @GetMapping("/vat-recoverability/rules/{ruleId}")
+    @Operation(summary = "Détails d'une règle",
+               description = "Récupère les détails d'une règle par ID")
+    public ResponseEntity<ApiResponse<RecoverabilityRule>> getRule(
+            @PathVariable Long companyId,
+            @PathVariable Long ruleId) {
+
+        RecoverabilityRule rule = ruleRepository.findById(ruleId)
+            .orElseThrow(() -> new com.predykt.accounting.exception.ResourceNotFoundException("Règle non trouvée"));
+        return ResponseEntity.ok(ApiResponse.success(rule));
+    }
+
+    @PostMapping("/vat-recoverability/rules")
+    @Operation(summary = "Créer une nouvelle règle",
+               description = "Crée une nouvelle règle de détection de récupérabilité TVA")
+    public ResponseEntity<ApiResponse<RecoverabilityRule>> createRule(
+            @PathVariable Long companyId,
+            @Valid @RequestBody RecoverabilityRule rule) {
+
+        RecoverabilityRule saved = ruleRepository.save(rule);
+        ruleEngine.invalidateCache();
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.success(saved));
+    }
+
+    @PutMapping("/vat-recoverability/rules/{ruleId}")
+    @Operation(summary = "Modifier une règle",
+               description = "Met à jour une règle de détection existante")
+    public ResponseEntity<ApiResponse<RecoverabilityRule>> updateRule(
+            @PathVariable Long companyId,
+            @PathVariable Long ruleId,
+            @Valid @RequestBody RecoverabilityRule updatedRule) {
+
+        RecoverabilityRule rule = ruleRepository.findById(ruleId)
+            .orElseThrow(() -> new com.predykt.accounting.exception.ResourceNotFoundException("Règle non trouvée"));
+
+        // Mettre à jour les champs
+        rule.setName(updatedRule.getName());
+        rule.setDescription(updatedRule.getDescription());
+        rule.setPriority(updatedRule.getPriority());
+        rule.setConfidenceScore(updatedRule.getConfidenceScore());
+        rule.setAccountPattern(updatedRule.getAccountPattern());
+        rule.setDescriptionPattern(updatedRule.getDescriptionPattern());
+        rule.setRequiredKeywords(updatedRule.getRequiredKeywords());
+        rule.setExcludedKeywords(updatedRule.getExcludedKeywords());
+        rule.setCategory(updatedRule.getCategory());
+        rule.setReason(updatedRule.getReason());
+        rule.setLegalReference(updatedRule.getLegalReference());
+        rule.setIsActive(updatedRule.getIsActive());
+        rule.setRuleType(updatedRule.getRuleType());
+
+        RecoverabilityRule saved = ruleRepository.save(rule);
+        ruleEngine.invalidateCache();
+
+        return ResponseEntity.ok(ApiResponse.success(saved));
+    }
+
+    @PutMapping("/vat-recoverability/rules/{ruleId}/toggle")
+    @Operation(summary = "Activer/Désactiver une règle",
+               description = "Active ou désactive une règle de détection")
+    public ResponseEntity<ApiResponse<RecoverabilityRule>> toggleRule(
+            @PathVariable Long companyId,
+            @PathVariable Long ruleId,
+            @RequestParam boolean active) {
+
+        RecoverabilityRule rule = ruleRepository.findById(ruleId)
+            .orElseThrow(() -> new com.predykt.accounting.exception.ResourceNotFoundException("Règle non trouvée"));
+
+        rule.setIsActive(active);
+        RecoverabilityRule saved = ruleRepository.save(rule);
+        ruleEngine.invalidateCache();
+
+        return ResponseEntity.ok(ApiResponse.success(saved));
+    }
+
+    @DeleteMapping("/vat-recoverability/rules/{ruleId}")
+    @Operation(summary = "Supprimer une règle",
+               description = "Supprime une règle de détection (désactivation recommandée à la place)")
+    public ResponseEntity<ApiResponse<String>> deleteRule(
+            @PathVariable Long companyId,
+            @PathVariable Long ruleId) {
+
+        ruleRepository.deleteById(ruleId);
+        ruleEngine.invalidateCache();
+
+        return ResponseEntity.ok(ApiResponse.success("Règle supprimée avec succès"));
+    }
+
+    @GetMapping("/vat-recoverability/rules/statistics")
+    @Operation(summary = "Statistiques des règles",
+               description = "Récupère les statistiques de performance du moteur de règles")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getRuleEngineStatistics(
+            @PathVariable Long companyId) {
+
+        Map<String, Object> stats = vatRecoverabilityService.getRuleEngineStatistics();
+        return ResponseEntity.ok(ApiResponse.success(stats));
+    }
+
+    @GetMapping("/vat-recoverability/rules/needing-review")
+    @Operation(summary = "Règles nécessitant une révision",
+               description = "Récupère les règles avec faible précision ou trop de corrections")
+    public ResponseEntity<ApiResponse<List<RecoverabilityRule>>> getRulesNeedingReview(
+            @PathVariable Long companyId) {
+
+        List<RecoverabilityRule> rules = ruleRepository.findRulesNeedingReview();
+        return ResponseEntity.ok(ApiResponse.success(rules));
+    }
+
+    @GetMapping("/vat-recoverability/rules/top-performing")
+    @Operation(summary = "Règles les plus performantes",
+               description = "Récupère les règles avec le meilleur taux de précision")
+    public ResponseEntity<ApiResponse<List<RecoverabilityRule>>> getTopPerformingRules(
+            @PathVariable Long companyId) {
+
+        List<RecoverabilityRule> rules = ruleRepository.findTopPerformingRules();
+        return ResponseEntity.ok(ApiResponse.success(rules));
+    }
+
+    @PostMapping("/vat-recoverability/rules/cache/invalidate")
+    @Operation(summary = "Invalider le cache des règles",
+               description = "Force le rechargement des règles depuis la base de données")
+    public ResponseEntity<ApiResponse<String>> invalidateRuleCache(
+            @PathVariable Long companyId) {
+
+        vatRecoverabilityService.invalidateRuleCache();
+        return ResponseEntity.ok(ApiResponse.success("Cache invalidé avec succès"));
+    }
+
+    @PostMapping("/vat-recoverability/detect")
+    @Operation(summary = "Tester la détection de catégorie",
+               description = "Teste la détection de catégorie pour un compte et une description donnés")
+    public ResponseEntity<ApiResponse<VATRecoverabilityRuleEngine.DetectionResult>> testDetection(
+            @PathVariable Long companyId,
+            @RequestParam String accountNumber,
+            @RequestParam String description) {
+
+        VATRecoverabilityRuleEngine.DetectionResult result =
+            vatRecoverabilityService.detectRecoverableCategoryWithDetails(accountNumber, description);
 
         return ResponseEntity.ok(ApiResponse.success(result));
     }

@@ -28,6 +28,7 @@ public class VATRecoverabilityService {
 
     private final VATTransactionRepository vatTransactionRepository;
     private final CompanyRepository companyRepository;
+    private final VATRecoverabilityRuleEngine ruleEngine;
 
     /**
      * Enregistre une transaction de TVA avec sa catégorie de récupérabilité
@@ -79,81 +80,37 @@ public class VATRecoverabilityService {
 
     /**
      * Détecte automatiquement la catégorie de récupérabilité selon le compte OHADA
-     * Règles fiscales camerounaises
+     * Utilise le moteur de règles optimisé avec scoring et apprentissage
+     *
+     * @param accountNumber Numéro de compte OHADA
+     * @param description Description de la transaction
+     * @return Résultat de détection avec catégorie, confiance et règle appliquée
+     */
+    public VATRecoverabilityRuleEngine.DetectionResult detectRecoverableCategoryWithDetails(
+            String accountNumber, String description) {
+
+        return ruleEngine.detectCategory(
+            accountNumber != null ? accountNumber : "",
+            description != null ? description : ""
+        );
+    }
+
+    /**
+     * Détecte automatiquement la catégorie de récupérabilité (méthode simplifiée)
+     * Règles fiscales camerounaises avec moteur de règles optimisé
      */
     public VATRecoverableCategory detectRecoverableCategory(String accountNumber, String description) {
-        if (accountNumber == null) {
-            return VATRecoverableCategory.FULLY_RECOVERABLE;
-        }
+        VATRecoverabilityRuleEngine.DetectionResult result = detectRecoverableCategoryWithDetails(
+            accountNumber, description
+        );
 
-        String desc = description != null ? description.toLowerCase() : "";
+        log.debug("🔍 Détection catégorie - Compte: {} - Catégorie: {} - Confiance: {}% - Règle: {}",
+            accountNumber,
+            result.getCategory().getDisplayName(),
+            result.getConfidence(),
+            result.getAppliedRule() != null ? result.getAppliedRule().getName() : "Défaut");
 
-        // COMPTES 24x - Immobilisations
-        if (accountNumber.startsWith("24")) {
-            // 2441 - Matériel de transport
-            if (accountNumber.startsWith("2441")) {
-                // Véhicules de tourisme (< 9 places)
-                if (desc.contains("tourisme") || desc.contains("voiture") ||
-                    desc.contains("berline") || desc.contains("citadine") ||
-                    desc.contains("véhicule de tourisme") || desc.contains("vp")) {
-                    return VATRecoverableCategory.NON_RECOVERABLE_TOURISM_VEHICLE;
-                }
-                // Véhicules utilitaires (camions, VU) - TVA 100% récupérable
-                if (desc.contains("utilitaire") || desc.contains("camion") ||
-                    desc.contains("fourgon") || desc.contains("vu")) {
-                    return VATRecoverableCategory.FULLY_RECOVERABLE;
-                }
-            }
-        }
-
-        // COMPTES 60x - Achats
-        if (accountNumber.startsWith("60")) {
-            // 605 - Carburants
-            if (accountNumber.startsWith("605") || desc.contains("carburant") ||
-                desc.contains("essence") || desc.contains("gasoil") || desc.contains("diesel")) {
-
-                // Carburant pour véhicules de tourisme - 0% récupérable
-                if (desc.contains("vp") || desc.contains("voiture") ||
-                    desc.contains("tourisme") || desc.contains("berline")) {
-                    return VATRecoverableCategory.NON_RECOVERABLE_FUEL_VP;
-                }
-
-                // Carburant pour véhicules utilitaires - 80% récupérable
-                if (desc.contains("vu") || desc.contains("utilitaire") ||
-                    desc.contains("camion") || desc.contains("fourgon")) {
-                    return VATRecoverableCategory.RECOVERABLE_80_PERCENT;
-                }
-
-                // Par défaut pour carburant sans précision - considérer comme VU (80%)
-                return VATRecoverableCategory.RECOVERABLE_80_PERCENT;
-            }
-        }
-
-        // COMPTES 62x - Services extérieurs
-        if (accountNumber.startsWith("62")) {
-            // 627 - Frais de représentation
-            if (accountNumber.startsWith("627") ||
-                desc.contains("restaurant") || desc.contains("représentation") ||
-                desc.contains("réception") || desc.contains("cadeaux")) {
-                return VATRecoverableCategory.NON_RECOVERABLE_REPRESENTATION;
-            }
-        }
-
-        // Dépenses de luxe (non exhaustif)
-        if (desc.contains("luxe") || desc.contains("somptuaire") ||
-            desc.contains("golf") || desc.contains("yachting") ||
-            desc.contains("chasse") || desc.contains("pêche")) {
-            return VATRecoverableCategory.NON_RECOVERABLE_LUXURY;
-        }
-
-        // Dépenses personnelles
-        if (desc.contains("personnel") || desc.contains("privé") ||
-            desc.contains("dirigeant") || desc.contains("famille")) {
-            return VATRecoverableCategory.NON_RECOVERABLE_PERSONAL;
-        }
-
-        // Par défaut : TVA 100% récupérable
-        return VATRecoverableCategory.FULLY_RECOVERABLE;
+        return result.getCategory();
     }
 
     /**
@@ -252,6 +209,7 @@ public class VATRecoverabilityService {
 
     /**
      * Met à jour la catégorie de récupérabilité d'une transaction
+     * Enregistre la correction pour apprentissage du moteur de règles
      */
     @Transactional
     public VATTransaction updateRecoverableCategory(Long transactionId, VATRecoverableCategory newCategory, String justification) {
@@ -264,10 +222,45 @@ public class VATRecoverabilityService {
 
         VATTransaction saved = vatTransactionRepository.save(transaction);
 
+        // Enregistrer la correction pour l'apprentissage du moteur de règles
+        if (!oldCategory.equals(newCategory)) {
+            // Récupérer l'ID de la règle qui a été appliquée (si disponible)
+            VATRecoverabilityRuleEngine.DetectionResult detectionResult = ruleEngine.detectCategory(
+                transaction.getLedgerEntry() != null ? transaction.getLedgerEntry().getAccountNumber() : "",
+                transaction.getDescription() != null ? transaction.getDescription() : ""
+            );
+
+            Long ruleId = detectionResult.getAppliedRule() != null
+                ? detectionResult.getAppliedRule().getId()
+                : null;
+
+            ruleEngine.recordCorrection(transactionId, oldCategory, newCategory, ruleId);
+
+            log.warn("⚠️ Correction enregistrée pour apprentissage - Transaction ID: {} - Ancien: {} - Nouveau: {} - Règle: {}",
+                transactionId, oldCategory.getDisplayName(), newCategory.getDisplayName(),
+                ruleId != null ? detectionResult.getAppliedRule().getName() : "Aucune");
+        }
+
         log.info("🔄 Catégorie de récupérabilité modifiée - Transaction ID: {} - Ancien: {} - Nouveau: {}",
             transactionId, oldCategory.getDisplayName(), newCategory.getDisplayName());
 
         return saved;
+    }
+
+    /**
+     * Récupère les statistiques du moteur de règles
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> getRuleEngineStatistics() {
+        return ruleEngine.getStatistics();
+    }
+
+    /**
+     * Invalide le cache du moteur de règles
+     */
+    public void invalidateRuleCache() {
+        ruleEngine.invalidateCache();
+        log.info("♻️ Cache du moteur de règles invalidé");
     }
 
     /**
