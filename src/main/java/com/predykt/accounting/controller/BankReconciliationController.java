@@ -278,7 +278,7 @@ public class BankReconciliationController {
                 }
 
                 // Lier l'écriture au rapprochement
-                generaltr LedgerRepository.save(gl);
+                generalLedgerRepository.save(gl);
             }
 
             reconciliation = reconciliationService.addPendingItem(reconciliationId, item);

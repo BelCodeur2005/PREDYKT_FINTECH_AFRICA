@@ -16,9 +16,11 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class CompanyService {
-    
+
     private final CompanyRepository companyRepository;
     private final CompanyMapper companyMapper;
+    private final TaxService taxService;
+    private final ChartOfAccountsService chartOfAccountsService;
     
     @Transactional
     public Company createCompany(CompanyCreateRequest request) {
@@ -36,7 +38,23 @@ public class CompanyService {
         
         Company savedCompany = companyRepository.save(company);
         log.info("Entreprise créée avec succès: ID={}, Nom={}", savedCompany.getId(), savedCompany.getName());
-        
+
+        // Initialiser le plan comptable OHADA
+        try {
+            chartOfAccountsService.initializeDefaultChartOfAccounts(savedCompany.getId());
+            log.info("✅ Plan comptable OHADA initialisé pour {}", savedCompany.getName());
+        } catch (Exception e) {
+            log.error("❌ Erreur lors de l'initialisation du plan comptable pour {}", savedCompany.getName(), e);
+        }
+
+        // Initialiser les configurations fiscales par défaut
+        try {
+            taxService.initializeDefaultTaxConfigurations(savedCompany);
+            log.info("✅ Configurations fiscales initialisées pour {}", savedCompany.getName());
+        } catch (Exception e) {
+            log.error("❌ Erreur lors de l'initialisation des taxes pour {}", savedCompany.getName(), e);
+        }
+
         return savedCompany;
     }
     
