@@ -21,6 +21,31 @@ public interface RecoverabilityRuleRepository extends JpaRepository<Recoverabili
     List<RecoverabilityRule> findByIsActiveTrueOrderByPriorityAsc();
 
     /**
+     * Trouve les règles applicables pour une entreprise (MULTI-TENANT)
+     * Inclut les règles GLOBAL + règles spécifiques selon le mode
+     *
+     * Mode SHARED: GLOBAL + COMPANY (pour cette company)
+     * Mode DEDICATED: GLOBAL + TENANT (pour ce tenant)
+     * Mode CABINET: GLOBAL + CABINET (pour ce cabinet) + COMPANY (pour cette company)
+     */
+    @Query("""
+        SELECT r FROM RecoverabilityRule r
+        WHERE r.isActive = true
+        AND (
+            r.scopeType = 'GLOBAL'
+            OR (r.scopeType = 'COMPANY' AND r.company.id = :companyId)
+            OR (r.scopeType = 'TENANT' AND r.scopeId = :tenantId)
+            OR (r.scopeType = 'CABINET' AND r.scopeId = :cabinetId)
+        )
+        ORDER BY r.priority ASC
+        """)
+    List<RecoverabilityRule> findApplicableRulesForContext(
+        @Param("companyId") Long companyId,
+        @Param("tenantId") String tenantId,
+        @Param("cabinetId") String cabinetId
+    );
+
+    /**
      * Trouve les règles actives par type
      */
     List<RecoverabilityRule> findByIsActiveTrueAndRuleTypeOrderByPriorityAsc(String ruleType);

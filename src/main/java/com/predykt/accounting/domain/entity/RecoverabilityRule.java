@@ -18,7 +18,9 @@ import lombok.*;
 @Table(name = "recoverability_rules", indexes = {
     @Index(name = "idx_recov_rule_priority", columnList = "priority"),
     @Index(name = "idx_recov_rule_active", columnList = "is_active"),
-    @Index(name = "idx_recov_rule_category", columnList = "category")
+    @Index(name = "idx_recov_rule_category", columnList = "category"),
+    @Index(name = "idx_recov_rule_scope", columnList = "scope_type, scope_id"),
+    @Index(name = "idx_recov_rule_company", columnList = "company_id")
 })
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -37,6 +39,31 @@ public class RecoverabilityRule extends BaseEntity {
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    /**
+     * MULTI-TENANT: Portée de la règle (GLOBAL, COMPANY, CABINET, TENANT)
+     * - GLOBAL: Règle partagée par tous (règles par défaut)
+     * - COMPANY: Règle spécifique à une entreprise (mode SHARED)
+     * - CABINET: Règle spécifique à un cabinet comptable (mode CABINET)
+     * - TENANT: Règle spécifique à un tenant ETI (mode DEDICATED)
+     */
+    @Column(name = "scope_type", length = 20)
+    private String scopeType = "GLOBAL";  // GLOBAL, COMPANY, CABINET, TENANT
+
+    /**
+     * ID de la portée (company_id, cabinet_id, tenant_id selon scopeType)
+     * NULL si GLOBAL
+     */
+    @Column(name = "scope_id", length = 100)
+    private String scopeId;
+
+    /**
+     * Référence à l'entreprise (pour règles COMPANY uniquement)
+     * Facilite les requêtes
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "company_id")
+    private Company company;
 
     /**
      * Priorité de la règle (1 = plus haute priorité)
