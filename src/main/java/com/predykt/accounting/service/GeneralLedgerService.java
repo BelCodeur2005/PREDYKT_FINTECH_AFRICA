@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,10 +25,11 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class GeneralLedgerService {
-    
+
     private final GeneralLedgerRepository glRepository;
     private final CompanyRepository companyRepository;
     private final ChartOfAccountsRepository chartRepository;
+    private final VATRecoverabilityService vatRecoverabilityService;
     
     /**
      * Enregistrer une écriture comptable (respecte la partie double)
@@ -78,13 +80,102 @@ public class GeneralLedgerService {
                 .isLocked(false)
                 .build();
             
-            entries.add(glRepository.save(entry));
+            GeneralLedger savedEntry = glRepository.save(entry);
+            entries.add(savedEntry);
+
+            // ======== DÉTECTION AUTOMATIQUE DE LA TVA ========
+            // Si le compte est un compte de TVA déductible (445x), calculer automatiquement
+            // la TVA récupérable en appliquant les règles de récupération + le prorata
+            if (isVATDeductibleAccount(line.getAccountNumber())) {
+                processVATEntry(company, savedEntry, request.getEntryDate());
+            }
         }
-        
-        log.info("Écriture {} enregistrée avec succès : {} lignes", 
+
+        log.info("Écriture {} enregistrée avec succès : {} lignes",
                  request.getReference(), entries.size());
-        
+
         return entries;
+    }
+
+    /**
+     * Vérifie si un compte est un compte de TVA déductible
+     * Comptes OHADA: 4451 - TVA récupérable
+     */
+    private boolean isVATDeductibleAccount(String accountNumber) {
+        // Comptes de TVA déductible commencent par 4451
+        // 4451 - TVA récupérable sur achats
+        // 44511 - TVA sur immobilisations
+        // 44512 - TVA sur marchandises
+        // 44513 - TVA sur services
+        return accountNumber != null && accountNumber.startsWith("4451");
+    }
+
+    /**
+     * Traite automatiquement une écriture de TVA déductible
+     *
+     * Calcule la TVA récupérable en 2 étapes:
+     * 1. Application des règles de récupération par nature (VU, VP, VER, etc.)
+     * 2. Application du prorata de TVA (si activités mixtes)
+     */
+    private void processVATEntry(Company company, GeneralLedger vatEntry, LocalDate entryDate) {
+        try {
+            // Le montant au débit du compte 4451 représente la TVA déductible
+            BigDecimal vatAmount = vatEntry.getDebitAmount();
+
+            if (vatAmount == null || vatAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                log.debug("⏩ Montant TVA nul ou crédit, pas de calcul de récupération");
+                return;
+            }
+
+            // Récupérer l'année fiscale depuis la date d'écriture
+            Integer fiscalYear = entryDate.getYear();
+
+            // Rechercher l'écriture d'achat correspondante (pour avoir le HT et le taux de TVA)
+            // Pour simplifier, on estime: HT = TVA / 0.1925 (taux 19.25%)
+            BigDecimal estimatedVatRate = new BigDecimal("0.1925");
+            BigDecimal htAmount = vatAmount.divide(estimatedVatRate, 2, RoundingMode.HALF_UP);
+
+            // Récupérer le numéro de compte et la description de la charge associée
+            String accountNumber = vatEntry.getAccount().getAccountNumber();
+            String description = vatEntry.getDescription();
+
+            log.debug("🔍 Détection automatique TVA: Compte {} - Montant {} FCFA - Description: {}",
+                    accountNumber, vatAmount, description);
+
+            // Calculer la TVA récupérable avec le moteur de règles + prorata
+            VATRecoverabilityService.VATRecoveryResult result =
+                vatRecoverabilityService.calculateRecoverableVATWithProrata(
+                    company.getId(),
+                    accountNumber,
+                    description,
+                    htAmount,
+                    vatAmount,
+                    estimatedVatRate,
+                    fiscalYear,
+                    vatEntry.getId()
+                );
+
+            // Logger le résultat
+            if (result.getHasProrataImpact()) {
+                log.info("✅ TVA détectée et calculée: {} FCFA → {} FCFA récupérable (après prorata {}%) - Catégorie: {}",
+                        result.getTotalVAT(),
+                        result.getRecoverableVAT(),
+                        result.getProrataRate() != null ?
+                            result.getProrataRate().multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP) :
+                            new BigDecimal("100.00"),
+                        result.getRecoveryCategory().getDisplayName());
+            } else {
+                log.info("✅ TVA détectée et calculée: {} FCFA → {} FCFA récupérable - Catégorie: {}",
+                        result.getTotalVAT(),
+                        result.getRecoverableVAT(),
+                        result.getRecoveryCategory().getDisplayName());
+            }
+
+        } catch (Exception e) {
+            // Ne pas bloquer l'enregistrement de l'écriture si le calcul TVA échoue
+            log.error("❌ Erreur lors du calcul automatique de TVA pour l'écriture {}: {}",
+                    vatEntry.getId(), e.getMessage());
+        }
     }
     
     /**
