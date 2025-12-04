@@ -45,12 +45,23 @@ public class VATRecoverabilityRuleEngine {
     private static final long CACHE_TTL = 300_000; // 5 minutes
 
     /**
-     * Détecte la catégorie de récupérabilité avec le système de règles
+     * Détecte la catégorie de récupérabilité avec le système de règles (MULTI-TENANT)
      *
+     * @param companyId Company ID (pour contexte multi-tenant)
+     * @param tenantId Tenant ID (mode DEDICATED)
+     * @param cabinetId Cabinet ID (mode CABINET)
+     * @param accountNumber Numéro de compte OHADA
+     * @param description Description de la transaction
      * @return Résultat avec catégorie, confiance, règle appliquée et suggestions
      */
     @Transactional
-    public DetectionResult detectCategory(String accountNumber, String description) {
+    public DetectionResult detectCategory(
+            Long companyId,
+            String tenantId,
+            String cabinetId,
+            String accountNumber,
+            String description) {
+
         long startTime = System.nanoTime();
 
         try {
@@ -58,10 +69,10 @@ public class VATRecoverabilityRuleEngine {
             String normalizedDesc = textNormalizer.normalize(description);
             String expandedDesc = textNormalizer.normalizeWithSynonyms(description);
 
-            // Récupérer les règles actives
-            List<RecoverabilityRule> rules = getActiveRules();
+            // Récupérer les règles applicables selon le contexte multi-tenant
+            List<RecoverabilityRule> rules = getApplicableRules(companyId, tenantId, cabinetId);
 
-            log.debug("🔍 Détection pour compte {} - Description: {} - {} règles actives",
+            log.debug("🔍 [Multi-Tenant] Détection pour compte {} - Description: {} - {} règles applicables",
                 accountNumber, description, rules.size());
 
             // Évaluer toutes les règles et garder les matches
@@ -246,8 +257,41 @@ public class VATRecoverabilityRuleEngine {
     }
 
     /**
-     * Récupère les règles actives (avec cache)
+     * Méthode de compatibilité (sans contexte multi-tenant)
+     * Retourne uniquement les règles GLOBAL
      */
+    public DetectionResult detectCategory(String accountNumber, String description) {
+        return detectCategory(null, null, null, accountNumber, description);
+    }
+
+    /**
+     * Récupère les règles applicables selon le contexte multi-tenant (AVEC CACHE)
+     *
+     * Logique de sélection:
+     * - Mode SHARED: Règles GLOBAL + règles COMPANY (pour company_id)
+     * - Mode DEDICATED: Règles GLOBAL + règles TENANT (pour tenant_id)
+     * - Mode CABINET: Règles GLOBAL + règles CABINET (pour cabinet_id) + règles COMPANY (pour company_id)
+     */
+    private List<RecoverabilityRule> getApplicableRules(Long companyId, String tenantId, String cabinetId) {
+        // Note: Pour simplifier, on désactive temporairement le cache car il doit être
+        // contextualisé par (companyId, tenantId, cabinetId)
+        // TODO: Implémenter un cache Map<String, List<Rule>> avec clé = context
+
+        List<RecoverabilityRule> rules = ruleRepository.findApplicableRulesForContext(
+            companyId, tenantId, cabinetId
+        );
+
+        log.debug("📚 [Multi-Tenant] Règles chargées - Company: {}, Tenant: {}, Cabinet: {} → {} règles",
+            companyId, tenantId, cabinetId, rules.size());
+
+        return rules;
+    }
+
+    /**
+     * Récupère les règles actives GLOBAL uniquement (avec cache) - LEGACY
+     * @deprecated Utiliser getApplicableRules() avec contexte multi-tenant
+     */
+    @Deprecated
     private List<RecoverabilityRule> getActiveRules() {
         long now = System.currentTimeMillis();
 
@@ -260,7 +304,7 @@ public class VATRecoverabilityRuleEngine {
         cachedActiveRules = ruleRepository.findByIsActiveTrueOrderByPriorityAsc();
         cacheTimestamp = now;
 
-        log.debug("📚 Règles rechargées: {} règles actives", cachedActiveRules.size());
+        log.debug("📚 Règles GLOBAL rechargées: {} règles actives", cachedActiveRules.size());
 
         return cachedActiveRules;
     }
