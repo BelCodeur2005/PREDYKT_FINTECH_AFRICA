@@ -3,6 +3,7 @@ package com.predykt.accounting.service;
 import com.predykt.accounting.domain.entity.Company;
 import com.predykt.accounting.domain.enums.AccountType;
 import com.predykt.accounting.dto.response.BalanceSheetResponse;
+import com.predykt.accounting.dto.response.CashFlowStatementResponse;
 import com.predykt.accounting.dto.response.IncomeStatementResponse;
 import com.predykt.accounting.exception.ResourceNotFoundException;
 import com.predykt.accounting.repository.CompanyRepository;
@@ -149,7 +150,203 @@ public class FinancialReportService {
             .netMarginPercentage(netMarginPct)
             .build();
     }
-    
+
+    /**
+     * Générer le Tableau de flux de trésorerie (Cash Flow Statement)
+     * Conforme OHADA - OBLIGATOIRE
+     */
+    public CashFlowStatementResponse generateCashFlowStatement(Long companyId,
+                                                               LocalDate startDate,
+                                                               LocalDate endDate) {
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée"));
+
+        log.info("Génération du tableau de flux de trésorerie pour l'entreprise {} du {} au {}",
+                companyId, startDate, endDate);
+
+        // Récupérer le résultat net depuis le compte de résultat
+        IncomeStatementResponse incomeStatement = generateIncomeStatement(companyId, startDate, endDate);
+        BigDecimal netIncome = incomeStatement.getNetIncome();
+
+        // ========== A. FLUX DE TRÉSORERIE D'EXPLOITATION ==========
+
+        // Ajustements pour éléments sans effet de trésorerie
+        BigDecimal depreciation = calculateAccountBalance(companyId, "681", startDate, endDate).abs(); // Dotations aux amortissements
+        BigDecimal provisionsIncrease = calculateAccountBalance(companyId, "69", startDate, endDate).abs(); // Provisions
+        BigDecimal provisionsDecrease = calculateAccountBalance(companyId, "79", startDate, endDate).abs(); // Reprises
+
+        // Gains/pertes sur cessions (compte 81x ou 65x/75x selon OHADA)
+        BigDecimal gainOnDisposal = calculateAccountBalance(companyId, "758", startDate, endDate).abs();
+        BigDecimal lossOnDisposal = calculateAccountBalance(companyId, "658", startDate, endDate).abs();
+
+        // Résultat avant variation du BFR
+        BigDecimal incomeBeforeWC = netIncome
+            .add(depreciation)
+            .add(provisionsIncrease)
+            .subtract(provisionsDecrease)
+            .subtract(gainOnDisposal)
+            .add(lossOnDisposal);
+
+        // Variations du besoin en fonds de roulement
+        LocalDate previousPeriodEnd = startDate.minusDays(1);
+
+        BigDecimal inventoryChange = calculateAccountClassBalance(companyId, "3", endDate)
+            .subtract(calculateAccountClassBalance(companyId, "3", previousPeriodEnd));
+
+        BigDecimal receivablesChange = calculateAccountClassBalance(companyId, "411", endDate)
+            .subtract(calculateAccountClassBalance(companyId, "411", previousPeriodEnd));
+
+        BigDecimal prepaidChange = calculateAccountClassBalance(companyId, "47", endDate, "471")
+            .subtract(calculateAccountClassBalance(companyId, "47", previousPeriodEnd, "471"));
+
+        BigDecimal payablesChange = calculateAccountClassBalance(companyId, "401", endDate)
+            .subtract(calculateAccountClassBalance(companyId, "401", previousPeriodEnd));
+
+        BigDecimal accruedChange = calculateAccountClassBalance(companyId, "47", endDate, "472")
+            .subtract(calculateAccountClassBalance(companyId, "47", previousPeriodEnd, "472"));
+
+        // Flux net d'exploitation
+        BigDecimal netOperatingCashFlow = incomeBeforeWC
+            .subtract(inventoryChange)
+            .subtract(receivablesChange)
+            .subtract(prepaidChange)
+            .add(payablesChange)
+            .add(accruedChange);
+
+        CashFlowStatementResponse.OperatingCashFlow operatingCF = CashFlowStatementResponse.OperatingCashFlow.builder()
+            .netIncome(netIncome)
+            .depreciationAndAmortization(depreciation)
+            .provisionsIncrease(provisionsIncrease)
+            .provisionsDecrease(provisionsDecrease)
+            .gainOnAssetDisposal(gainOnDisposal)
+            .lossOnAssetDisposal(lossOnDisposal)
+            .incomeBeforeWorkingCapitalChanges(incomeBeforeWC)
+            .inventoryChange(inventoryChange)
+            .receivablesChange(receivablesChange)
+            .prepaidExpensesChange(prepaidChange)
+            .payablesChange(payablesChange)
+            .accruedExpensesChange(accruedChange)
+            .netOperatingCashFlow(netOperatingCashFlow)
+            .build();
+
+        // ========== B. FLUX DE TRÉSORERIE D'INVESTISSEMENT ==========
+
+        // Acquisitions (débits des comptes 2x)
+        BigDecimal intangibleAcq = calculateAccountClassBalance(companyId, "21", startDate, endDate).abs();
+        BigDecimal tangibleAcq = calculateAccountClassBalance(companyId, "22", startDate, endDate).abs()
+            .add(calculateAccountClassBalance(companyId, "23", startDate, endDate).abs())
+            .add(calculateAccountClassBalance(companyId, "24", startDate, endDate).abs());
+        BigDecimal financialAcq = calculateAccountClassBalance(companyId, "26", startDate, endDate).abs();
+
+        // Cessions (crédits des comptes 2x) - Approximation via variations
+        BigDecimal intangibleDisp = BigDecimal.ZERO; // À améliorer avec journal des cessions
+        BigDecimal tangibleDisp = gainOnDisposal.add(lossOnDisposal); // Valeur de cession
+        BigDecimal financialDisp = BigDecimal.ZERO;
+
+        // Transactions majeures (simplifiée - à enrichir avec analyse du grand livre)
+        List<CashFlowStatementResponse.AssetTransaction> majorAcquisitions = new ArrayList<>();
+        List<CashFlowStatementResponse.AssetTransaction> majorDisposals = new ArrayList<>();
+
+        BigDecimal netInvestingCashFlow = intangibleDisp.add(tangibleDisp).add(financialDisp)
+            .subtract(intangibleAcq).subtract(tangibleAcq).subtract(financialAcq);
+
+        CashFlowStatementResponse.InvestingCashFlow investingCF = CashFlowStatementResponse.InvestingCashFlow.builder()
+            .intangibleAssetsAcquisitions(intangibleAcq.negate())
+            .tangibleAssetsAcquisitions(tangibleAcq.negate())
+            .financialAssetsAcquisitions(financialAcq.negate())
+            .intangibleAssetDisposals(intangibleDisp)
+            .tangibleAssetDisposals(tangibleDisp)
+            .financialAssetDisposals(financialDisp)
+            .majorAcquisitions(majorAcquisitions)
+            .majorDisposals(majorDisposals)
+            .netInvestingCashFlow(netInvestingCashFlow)
+            .build();
+
+        // ========== C. FLUX DE TRÉSORERIE DE FINANCEMENT ==========
+
+        // Variations des capitaux propres
+        BigDecimal capitalIncrease = calculateAccountBalance(companyId, "101", startDate, endDate).abs();
+        BigDecimal capitalDecrease = BigDecimal.ZERO; // Rare
+
+        // Variations des emprunts
+        BigDecimal borrowingsCurrent = calculateAccountClassBalance(companyId, "16", endDate);
+        BigDecimal borrowingsPrevious = calculateAccountClassBalance(companyId, "16", previousPeriodEnd);
+        BigDecimal borrowingsChange = borrowingsCurrent.subtract(borrowingsPrevious);
+
+        BigDecimal borrowingsReceived = borrowingsChange.compareTo(BigDecimal.ZERO) > 0 ? borrowingsChange : BigDecimal.ZERO;
+        BigDecimal borrowingsRepaid = borrowingsChange.compareTo(BigDecimal.ZERO) < 0 ? borrowingsChange.abs() : BigDecimal.ZERO;
+
+        // Dividendes versés (compte 46x)
+        BigDecimal dividendsPaid = calculateAccountBalance(companyId, "465", startDate, endDate).abs();
+
+        // Subventions reçues
+        BigDecimal subsidies = calculateAccountBalance(companyId, "14", startDate, endDate).abs();
+
+        BigDecimal netFinancingCashFlow = capitalIncrease
+            .subtract(capitalDecrease)
+            .add(borrowingsReceived)
+            .subtract(borrowingsRepaid)
+            .subtract(dividendsPaid)
+            .add(subsidies);
+
+        CashFlowStatementResponse.FinancingCashFlow financingCF = CashFlowStatementResponse.FinancingCashFlow.builder()
+            .capitalIncreases(capitalIncrease)
+            .capitalDecreases(capitalDecrease)
+            .borrowingsReceived(borrowingsReceived)
+            .borrowingsRepaid(borrowingsRepaid.negate())
+            .dividendsPaid(dividendsPaid.negate())
+            .subsidiesReceived(subsidies)
+            .netFinancingCashFlow(netFinancingCashFlow)
+            .build();
+
+        // ========== RÉSUMÉ ==========
+
+        BigDecimal netCashChange = netOperatingCashFlow
+            .add(netInvestingCashFlow)
+            .add(netFinancingCashFlow);
+
+        // Trésorerie début et fin (comptes 5x)
+        BigDecimal beginningCash = calculateAccountClassBalance(companyId, "5", previousPeriodEnd);
+        BigDecimal endingCash = calculateAccountClassBalance(companyId, "5", endDate);
+        BigDecimal calculatedEndingCash = beginningCash.add(netCashChange);
+
+        // Vérification
+        boolean isBalanced = endingCash.subtract(calculatedEndingCash).abs()
+            .compareTo(new BigDecimal("0.01")) < 0; // Tolérance 0.01
+
+        // Ratios
+        BigDecimal cashFlowRatio = netIncome.compareTo(BigDecimal.ZERO) != 0
+            ? netOperatingCashFlow.divide(netIncome, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
+            : BigDecimal.ZERO;
+
+        BigDecimal freeCashFlow = netOperatingCashFlow.add(netInvestingCashFlow);
+
+        CashFlowStatementResponse.CashFlowSummary summary = CashFlowStatementResponse.CashFlowSummary.builder()
+            .netOperatingCashFlow(netOperatingCashFlow)
+            .netInvestingCashFlow(netInvestingCashFlow)
+            .netFinancingCashFlow(netFinancingCashFlow)
+            .netCashChange(netCashChange)
+            .beginningCash(beginningCash)
+            .endingCash(endingCash)
+            .calculatedEndingCash(calculatedEndingCash)
+            .isBalanced(isBalanced)
+            .cashFlowFromOperationsRatio(cashFlowRatio)
+            .freeCashFlow(freeCashFlow)
+            .build();
+
+        return CashFlowStatementResponse.builder()
+            .companyId(companyId)
+            .companyName(company.getName())
+            .startDate(startDate)
+            .endDate(endDate)
+            .fiscalYear(String.valueOf(endDate.getYear()))
+            .operatingCashFlow(operatingCF)
+            .investingCashFlow(investingCF)
+            .financingCashFlow(financingCF)
+            .summary(summary)
+            .build();
+    }
+
     // Méthodes utilitaires privées
     private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix, LocalDate asOfDate) {
         return chartService.getActiveAccounts(companyId).stream()

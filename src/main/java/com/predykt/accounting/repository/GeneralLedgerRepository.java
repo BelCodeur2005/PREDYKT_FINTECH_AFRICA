@@ -98,4 +98,15 @@ public interface GeneralLedgerRepository extends JpaRepository<GeneralLedger, Lo
         LocalDate startDate,
         LocalDate endDate
     );
+
+    // Recherche par préfixe de compte (pour balances âgées)
+    @Query("SELECT g FROM GeneralLedger g WHERE g.company = :company " +
+           "AND g.account.accountNumber LIKE CONCAT(:accountPrefix, '%') " +
+           "AND g.entryDate <= :asOfDate " +
+           "ORDER BY g.account.accountNumber, g.entryDate")
+    List<GeneralLedger> findByCompanyAndAccountNumberStartingWithAndEntryDateLessThanEqual(
+        @Param("company") Company company,
+        @Param("accountPrefix") String accountPrefix,
+        @Param("asOfDate") LocalDate asOfDate
+    );
 }

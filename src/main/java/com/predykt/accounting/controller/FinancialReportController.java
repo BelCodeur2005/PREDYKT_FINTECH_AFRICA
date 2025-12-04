@@ -2,6 +2,7 @@ package com.predykt.accounting.controller;
 
 import com.predykt.accounting.dto.response.ApiResponse;
 import com.predykt.accounting.dto.response.BalanceSheetResponse;
+import com.predykt.accounting.dto.response.CashFlowStatementResponse;
 import com.predykt.accounting.dto.response.IncomeStatementResponse;
 import com.predykt.accounting.service.FinancialReportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,5 +47,20 @@ public class FinancialReportController {
             reportService.generateIncomeStatement(companyId, startDate, endDate);
         
         return ResponseEntity.ok(ApiResponse.success(incomeStatement));
+    }
+
+    @GetMapping("/cash-flow-statement")
+    @Operation(summary = "Générer le Tableau de flux de trésorerie",
+               description = "Génère le tableau de flux de trésorerie (Cash Flow Statement) pour une période - OBLIGATOIRE OHADA")
+    public ResponseEntity<ApiResponse<CashFlowStatementResponse>> getCashFlowStatement(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        CashFlowStatementResponse cashFlowStatement =
+            reportService.generateCashFlowStatement(companyId, startDate, endDate);
+
+        return ResponseEntity.ok(ApiResponse.success(cashFlowStatement,
+            "Tableau de flux de trésorerie généré avec succès"));
     }
 }
