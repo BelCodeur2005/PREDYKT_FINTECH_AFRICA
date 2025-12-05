@@ -31,6 +31,7 @@ public interface VATProrataMapper {
     @Mapping(target = "prorataPercentage", expression = "java(calculatePercentage(calculation.getProrataRate()))")
     @Mapping(target = "recoveryPercentage", expression = "java(calculateRecoveryPercentage(calculation))")
     @Mapping(target = "hasProrataImpact", expression = "java(hasProrataImpact(calculation))")
+    @Mapping(target = "appliedRule", expression = "java(mapAppliedRule(calculation.getAppliedRule()))")
     @Mapping(target = "calculationExplanation", expression = "java(buildCalculationExplanation(calculation))")
     VATRecoveryCalculationResponse toResponse(VATRecoveryCalculation calculation);
 
@@ -66,6 +67,16 @@ public interface VATProrataMapper {
             return false;
         }
         return calculation.getRecoverableByNature().compareTo(calculation.getRecoverableWithProrata()) != 0;
+    }
+
+    /**
+     * Mappe la règle appliquée vers une chaîne
+     */
+    default String mapAppliedRule(com.predykt.accounting.domain.entity.RecoverabilityRule rule) {
+        if (rule == null) {
+            return null;
+        }
+        return rule.getRuleName() != null ? rule.getRuleName() : "Règle #" + rule.getId();
     }
 
     /**

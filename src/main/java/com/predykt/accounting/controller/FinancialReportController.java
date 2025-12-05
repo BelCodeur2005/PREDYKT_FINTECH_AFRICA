@@ -4,7 +4,9 @@ import com.predykt.accounting.dto.response.ApiResponse;
 import com.predykt.accounting.dto.response.BalanceSheetResponse;
 import com.predykt.accounting.dto.response.CashFlowStatementResponse;
 import com.predykt.accounting.dto.response.IncomeStatementResponse;
+import com.predykt.accounting.dto.response.TAFIREResponse;
 import com.predykt.accounting.service.FinancialReportService;
+import com.predykt.accounting.service.TAFIREService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +21,9 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 @Tag(name = "Rapports Financiers", description = "Génération des états financiers")
 public class FinancialReportController {
-    
+
     private final FinancialReportService reportService;
+    private final TAFIREService tafireService;
     
     @GetMapping("/balance-sheet")
     @Operation(summary = "Générer le Bilan",
@@ -62,5 +65,18 @@ public class FinancialReportController {
 
         return ResponseEntity.ok(ApiResponse.success(cashFlowStatement,
             "Tableau de flux de trésorerie généré avec succès"));
+    }
+
+    @GetMapping("/tafire")
+    @Operation(summary = "Générer le TAFIRE",
+               description = "Génère le Tableau Financier des Ressources et Emplois (TAFIRE) pour un exercice fiscal - OBLIGATOIRE OHADA grandes entreprises")
+    public ResponseEntity<ApiResponse<TAFIREResponse>> getTAFIRE(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        TAFIREResponse tafire = tafireService.generateTAFIRE(companyId, fiscalYear);
+
+        return ResponseEntity.ok(ApiResponse.success(tafire,
+            "TAFIRE généré avec succès - Variation FRNG: " + tafire.getVariationFRNG() + " XAF"));
     }
 }

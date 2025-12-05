@@ -38,6 +38,11 @@ public class ExportService {
 
     private final FinancialReportService reportService;
     private final CompanyRepository companyRepository;
+    private final GeneralLedgerService generalLedgerService;
+    private final AgingReportService agingReportService;
+    private final DashboardService dashboardService;
+    private final TAFIREService tafireService;
+    private final AuxiliaryJournalsService auxiliaryJournalsService;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
@@ -1037,6 +1042,1086 @@ public class ExportService {
             workbook.write(baos);
 
             log.info("Export Excel de l'état de rapprochement terminé - {} octets", baos.size());
+            return baos.toByteArray();
+        }
+    }
+
+    // ==================== BALANCE DE VÉRIFICATION ====================
+
+    /**
+     * Exporte la balance de vérification en PDF
+     */
+    public byte[] exportTrialBalanceToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export de la balance de vérification en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        List<GeneralLedgerService.TrialBalanceEntry> trialBalance =
+            generalLedgerService.getTrialBalance(companyId, startDate, endDate);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête
+        document.add(new Paragraph("BALANCE DE VÉRIFICATION")
+            .setFontSize(18)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(company.getName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph("Du " + startDate.format(DATE_FORMATTER) + " au " + endDate.format(DATE_FORMATTER))
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // Table principale
+        Table table = new Table(UnitValue.createPercentArray(new float[]{2, 4, 2, 2, 2, 2}))
+            .useAllAvailableWidth();
+
+        addTableHeader(table, "Compte", "Libellé", "Débit", "Crédit", "Solde Débit", "Solde Crédit");
+
+        BigDecimal totalDebit = BigDecimal.ZERO;
+        BigDecimal totalCredit = BigDecimal.ZERO;
+        BigDecimal totalBalanceDebit = BigDecimal.ZERO;
+        BigDecimal totalBalanceCredit = BigDecimal.ZERO;
+
+        for (GeneralLedgerService.TrialBalanceEntry entry : trialBalance) {
+            BigDecimal balanceDebit = BigDecimal.ZERO;
+            BigDecimal balanceCredit = BigDecimal.ZERO;
+
+            BigDecimal balance = entry.totalDebit().subtract(entry.totalCredit());
+            if (balance.compareTo(BigDecimal.ZERO) > 0) {
+                balanceDebit = balance;
+            } else {
+                balanceCredit = balance.abs();
+            }
+
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(entry.accountNumber()).setFontSize(9)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(entry.accountName()).setFontSize(9)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(formatAmount(entry.totalDebit())).setFontSize(9))
+                .setTextAlignment(TextAlignment.RIGHT));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(formatAmount(entry.totalCredit())).setFontSize(9))
+                .setTextAlignment(TextAlignment.RIGHT));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(formatAmount(balanceDebit)).setFontSize(9))
+                .setTextAlignment(TextAlignment.RIGHT));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(new Paragraph(formatAmount(balanceCredit)).setFontSize(9))
+                .setTextAlignment(TextAlignment.RIGHT));
+
+            totalDebit = totalDebit.add(entry.totalDebit());
+            totalCredit = totalCredit.add(entry.totalCredit());
+            totalBalanceDebit = totalBalanceDebit.add(balanceDebit);
+            totalBalanceCredit = totalBalanceCredit.add(balanceCredit);
+        }
+
+        // Ligne de totaux
+        com.itextpdf.layout.element.Cell totalLabelCell = new com.itextpdf.layout.element.Cell(1, 2)
+            .add(new Paragraph("TOTAUX").setBold())
+            .setBackgroundColor(ColorConstants.LIGHT_GRAY);
+        table.addCell(totalLabelCell);
+
+        addTableCell(table, formatAmount(totalDebit), true);
+        addTableCell(table, formatAmount(totalCredit), true);
+        addTableCell(table, formatAmount(totalBalanceDebit), true);
+        addTableCell(table, formatAmount(totalBalanceCredit), true);
+
+        document.add(table);
+
+        // Vérification équilibre
+        boolean isBalanced = totalDebit.compareTo(totalCredit) == 0 &&
+                           totalBalanceDebit.compareTo(totalBalanceCredit) == 0;
+
+        document.add(new Paragraph(isBalanced ? "\n✓ Balance équilibrée" : "\n⚠ Balance déséquilibrée")
+            .setFontSize(12)
+            .setBold()
+            .setFontColor(isBalanced ? ColorConstants.GREEN : ColorConstants.RED)
+            .setMarginTop(10));
+
+        // Pied de page
+        document.add(new Paragraph("Document généré le " + LocalDate.now().format(DATE_FORMATTER))
+            .setFontSize(10)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setMarginTop(20));
+
+        document.close();
+
+        log.info("Export PDF de la balance de vérification terminé - {} octets", baos.size());
+        return baos.toByteArray();
+    }
+
+    /**
+     * Exporte la balance de vérification en Excel
+     */
+    public byte[] exportTrialBalanceToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export de la balance de vérification en Excel pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        List<GeneralLedgerService.TrialBalanceEntry> trialBalance =
+            generalLedgerService.getTrialBalance(companyId, startDate, endDate);
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Balance de Vérification");
+
+            // Styles
+            CellStyle headerStyle = createHeaderStyle(workbook);
+            CellStyle titleStyle = createTitleStyle(workbook);
+            CellStyle totalStyle = createTotalStyle(workbook);
+            CellStyle currencyStyle = createCurrencyStyle(workbook);
+
+            int rowNum = 0;
+
+            // Titre
+            Row titleRow = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("BALANCE DE VÉRIFICATION");
+            titleCell.setCellStyle(titleStyle);
+
+            // Entreprise
+            Row companyRow = sheet.createRow(rowNum++);
+            companyRow.createCell(0).setCellValue(company.getName());
+
+            // Période
+            Row periodRow = sheet.createRow(rowNum++);
+            periodRow.createCell(0).setCellValue("Du " + startDate.format(DATE_FORMATTER) + " au " + endDate.format(DATE_FORMATTER));
+
+            rowNum++; // Ligne vide
+
+            // En-têtes de colonnes
+            Row headerRow = sheet.createRow(rowNum++);
+            String[] headers = {"Compte", "Libellé", "Débit", "Crédit", "Solde Débit", "Solde Crédit"};
+
+            for (int i = 0; i < headers.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            BigDecimal totalDebit = BigDecimal.ZERO;
+            BigDecimal totalCredit = BigDecimal.ZERO;
+            BigDecimal totalBalanceDebit = BigDecimal.ZERO;
+            BigDecimal totalBalanceCredit = BigDecimal.ZERO;
+
+            // Données
+            for (GeneralLedgerService.TrialBalanceEntry entry : trialBalance) {
+                Row dataRow = sheet.createRow(rowNum++);
+                int colNum = 0;
+
+                BigDecimal balanceDebit = BigDecimal.ZERO;
+                BigDecimal balanceCredit = BigDecimal.ZERO;
+
+                BigDecimal balance = entry.totalDebit().subtract(entry.totalCredit());
+                if (balance.compareTo(BigDecimal.ZERO) > 0) {
+                    balanceDebit = balance;
+                } else {
+                    balanceCredit = balance.abs();
+                }
+
+                dataRow.createCell(colNum++).setCellValue(entry.accountNumber());
+                dataRow.createCell(colNum++).setCellValue(entry.accountName());
+
+                org.apache.poi.ss.usermodel.Cell debitCell = dataRow.createCell(colNum++);
+                debitCell.setCellValue(entry.totalDebit().doubleValue());
+                debitCell.setCellStyle(currencyStyle);
+
+                org.apache.poi.ss.usermodel.Cell creditCell = dataRow.createCell(colNum++);
+                creditCell.setCellValue(entry.totalCredit().doubleValue());
+                creditCell.setCellStyle(currencyStyle);
+
+                org.apache.poi.ss.usermodel.Cell balDebitCell = dataRow.createCell(colNum++);
+                balDebitCell.setCellValue(balanceDebit.doubleValue());
+                balDebitCell.setCellStyle(currencyStyle);
+
+                org.apache.poi.ss.usermodel.Cell balCreditCell = dataRow.createCell(colNum++);
+                balCreditCell.setCellValue(balanceCredit.doubleValue());
+                balCreditCell.setCellStyle(currencyStyle);
+
+                totalDebit = totalDebit.add(entry.totalDebit());
+                totalCredit = totalCredit.add(entry.totalCredit());
+                totalBalanceDebit = totalBalanceDebit.add(balanceDebit);
+                totalBalanceCredit = totalBalanceCredit.add(balanceCredit);
+            }
+
+            // Ligne de totaux
+            Row totalRow = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell totalLabelCell = totalRow.createCell(0);
+            totalLabelCell.setCellValue("TOTAUX");
+            totalLabelCell.setCellStyle(totalStyle);
+
+            totalRow.createCell(1).setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalDebitCell = totalRow.createCell(2);
+            totalDebitCell.setCellValue(totalDebit.doubleValue());
+            totalDebitCell.setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalCreditCell = totalRow.createCell(3);
+            totalCreditCell.setCellValue(totalCredit.doubleValue());
+            totalCreditCell.setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalBalDebitCell = totalRow.createCell(4);
+            totalBalDebitCell.setCellValue(totalBalanceDebit.doubleValue());
+            totalBalDebitCell.setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalBalCreditCell = totalRow.createCell(5);
+            totalBalCreditCell.setCellValue(totalBalanceCredit.doubleValue());
+            totalBalCreditCell.setCellStyle(totalStyle);
+
+            // Auto-size columns
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            workbook.write(baos);
+
+            log.info("Export Excel de la balance de vérification terminé - {} octets", baos.size());
+            return baos.toByteArray();
+        }
+    }
+
+    // ==================== GRAND LIVRE (PDF) ====================
+
+    /**
+     * Exporte le grand livre complet en PDF
+     */
+    public byte[] exportGeneralLedgerToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du grand livre complet en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        List<com.predykt.accounting.domain.entity.GeneralLedger> entries =
+            reportService.getGeneralLedgerRepository().findByCompanyAndEntryDateBetween(company, startDate, endDate);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête
+        document.add(new Paragraph("GRAND LIVRE")
+            .setFontSize(18)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(company.getName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph("Du " + startDate.format(DATE_FORMATTER) + " au " + endDate.format(DATE_FORMATTER))
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // Table
+        Table table = new Table(UnitValue.createPercentArray(new float[]{1.5f, 2, 1.5f, 1.5f, 3, 1.5f, 1.5f}))
+            .useAllAvailableWidth();
+
+        addTableHeader(table, "Date", "Réf", "Journal", "Compte", "Libellé", "Débit", "Crédit");
+
+        BigDecimal totalDebit = BigDecimal.ZERO;
+        BigDecimal totalCredit = BigDecimal.ZERO;
+
+        for (com.predykt.accounting.domain.entity.GeneralLedger entry : entries) {
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getEntryDate().format(DATE_FORMATTER)).setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getReference() != null ? entry.getReference() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getJournalCode() != null ? entry.getJournalCode() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getAccount() != null ? entry.getAccount().getAccountNumber() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getDescription() != null ? entry.getDescription() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(formatAmount(entry.getDebitAmount())).setFontSize(8))
+                .setTextAlignment(TextAlignment.RIGHT));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(formatAmount(entry.getCreditAmount())).setFontSize(8))
+                .setTextAlignment(TextAlignment.RIGHT));
+
+            totalDebit = totalDebit.add(entry.getDebitAmount());
+            totalCredit = totalCredit.add(entry.getCreditAmount());
+        }
+
+        // Ligne de totaux
+        com.itextpdf.layout.element.Cell totalLabelCell = new com.itextpdf.layout.element.Cell(1, 5)
+            .add(new Paragraph("TOTAUX").setBold())
+            .setBackgroundColor(ColorConstants.LIGHT_GRAY);
+        table.addCell(totalLabelCell);
+
+        addTableCell(table, formatAmount(totalDebit), true);
+        addTableCell(table, formatAmount(totalCredit), true);
+
+        document.add(table);
+
+        // Statistiques
+        document.add(new Paragraph("\nNombre d'écritures: " + entries.size())
+            .setFontSize(10)
+            .setMarginTop(10));
+
+        boolean isBalanced = totalDebit.compareTo(totalCredit) == 0;
+        document.add(new Paragraph(isBalanced ? "✓ Grand livre équilibré" : "⚠ Grand livre déséquilibré")
+            .setFontSize(10)
+            .setBold()
+            .setFontColor(isBalanced ? ColorConstants.GREEN : ColorConstants.RED));
+
+        // Pied de page
+        document.add(new Paragraph("Document généré le " + LocalDate.now().format(DATE_FORMATTER))
+            .setFontSize(10)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setMarginTop(20));
+
+        document.close();
+
+        log.info("Export PDF du grand livre terminé - {} écritures, {} octets", entries.size(), baos.size());
+        return baos.toByteArray();
+    }
+
+    /**
+     * Ajouter une cellule avec style (helper)
+     */
+    private void addTableCell(Table table, String value, boolean isBold) {
+        com.itextpdf.layout.element.Cell cell = new com.itextpdf.layout.element.Cell()
+            .add(new Paragraph(value).setFontSize(9));
+        if (isBold) {
+            cell.setBold();
+            cell.setBackgroundColor(ColorConstants.LIGHT_GRAY);
+        }
+        cell.setTextAlignment(TextAlignment.RIGHT);
+        table.addCell(cell);
+    }
+
+    // ==================== TAFIRE (PRIORITÉ 2) ====================
+
+    /**
+     * Exporte le TAFIRE en PDF (format OHADA)
+     */
+    public byte[] exportTAFIREToPdf(Long companyId, Integer fiscalYear) throws IOException {
+        log.info("Export du TAFIRE en PDF pour l'entreprise {} - exercice {}", companyId, fiscalYear);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.TAFIREResponse tafire = tafireService.generateTAFIRE(companyId, fiscalYear);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête
+        document.add(new Paragraph("TABLEAU FINANCIER DES RESSOURCES ET EMPLOIS (TAFIRE)")
+            .setFontSize(16)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(company.getName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph("Exercice " + fiscalYear)
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // I. RESSOURCES STABLES
+        document.add(new Paragraph("I. RESSOURCES STABLES")
+            .setFontSize(13)
+            .setBold()
+            .setMarginTop(10));
+
+        Table ressourcesTable = new Table(UnitValue.createPercentArray(new float[]{4, 2}))
+            .useAllAvailableWidth();
+
+        addTableHeader(ressourcesTable, "Description", "Montant (" + tafire.getCurrency() + ")");
+
+        // A. Ressources internes
+        addTableRow(ressourcesTable, "A. Ressources internes", "");
+        addTableRow(ressourcesTable, "  Capacité d'autofinancement (CAF)",
+            formatAmount(tafire.getRessourcesStables().getCaf().getCafTotal()));
+        addTableRow(ressourcesTable, "  Cessions d'immobilisations",
+            formatAmount(tafire.getRessourcesStables().getCessionsImmobilisations()));
+
+        // B. Ressources externes
+        addTableRow(ressourcesTable, "B. Ressources externes", "");
+        addTableRow(ressourcesTable, "  Augmentation de capital",
+            formatAmount(tafire.getRessourcesStables().getAugmentationCapital()));
+        addTableRow(ressourcesTable, "  Emprunts à long terme",
+            formatAmount(tafire.getRessourcesStables().getEmpruntsLongTerme()));
+        addTableRow(ressourcesTable, "  Subventions d'investissement",
+            formatAmount(tafire.getRessourcesStables().getSubventionsInvestissement()));
+
+        addTableTotal(ressourcesTable, "TOTAL RESSOURCES STABLES",
+            formatAmount(tafire.getRessourcesStables().getTotalRessourcesStables()));
+
+        document.add(ressourcesTable);
+
+        // II. EMPLOIS STABLES
+        document.add(new Paragraph("II. EMPLOIS STABLES")
+            .setFontSize(13)
+            .setBold()
+            .setMarginTop(20));
+
+        Table emploisTable = new Table(UnitValue.createPercentArray(new float[]{4, 2}))
+            .useAllAvailableWidth();
+
+        addTableHeader(emploisTable, "Description", "Montant (" + tafire.getCurrency() + ")");
+
+        addTableRow(emploisTable, "Acquisitions immobilisations incorporelles",
+            formatAmount(tafire.getEmploisStables().getAcquisitionsImmobilisationsIncorporelles()));
+        addTableRow(emploisTable, "Acquisitions immobilisations corporelles",
+            formatAmount(tafire.getEmploisStables().getAcquisitionsImmobilisationsCorporelles()));
+        addTableRow(emploisTable, "Acquisitions immobilisations financières",
+            formatAmount(tafire.getEmploisStables().getAcquisitionsImmobilisationsFinancieres()));
+        addTableRow(emploisTable, "Remboursements emprunts long terme",
+            formatAmount(tafire.getEmploisStables().getRemboursementsEmpruntsLongTerme()));
+        addTableRow(emploisTable, "Dividendes versés",
+            formatAmount(tafire.getEmploisStables().getDividendesVerses()));
+
+        addTableTotal(emploisTable, "TOTAL EMPLOIS STABLES",
+            formatAmount(tafire.getEmploisStables().getTotalEmploisStables()));
+
+        document.add(emploisTable);
+
+        // III. VARIATION FRNG
+        document.add(new Paragraph("III. VARIATION DU FONDS DE ROULEMENT NET GLOBAL")
+            .setFontSize(13)
+            .setBold()
+            .setMarginTop(20));
+
+        Table frngTable = new Table(UnitValue.createPercentArray(new float[]{4, 2}))
+            .useAllAvailableWidth();
+
+        addTableTotal(frngTable, "VARIATION FRNG (Ressources - Emplois)",
+            formatAmount(tafire.getVariationFRNG()));
+
+        document.add(frngTable);
+
+        // IV. VARIATION BFR
+        document.add(new Paragraph("IV. VARIATION DU BESOIN EN FONDS DE ROULEMENT")
+            .setFontSize(13)
+            .setBold()
+            .setMarginTop(20));
+
+        Table bfrTable = new Table(UnitValue.createPercentArray(new float[]{4, 2}))
+            .useAllAvailableWidth();
+
+        addTableHeader(bfrTable, "Description", "Montant (" + tafire.getCurrency() + ")");
+
+        addTableRow(bfrTable, "BFR exercice N",
+            formatAmount(tafire.getVariationBFR().getBfrExerciceN()));
+        addTableRow(bfrTable, "BFR exercice N-1",
+            formatAmount(tafire.getVariationBFR().getBfrExerciceN1()));
+
+        addTableTotal(bfrTable, "VARIATION BFR (N - N-1)",
+            formatAmount(tafire.getVariationBFR().getVariationBFR()));
+
+        document.add(bfrTable);
+
+        // V. VARIATION TRÉSORERIE
+        document.add(new Paragraph("V. VARIATION DE LA TRÉSORERIE")
+            .setFontSize(13)
+            .setBold()
+            .setMarginTop(20));
+
+        Table tresoTable = new Table(UnitValue.createPercentArray(new float[]{4, 2}))
+            .useAllAvailableWidth();
+
+        addTableHeader(tresoTable, "Description", "Montant (" + tafire.getCurrency() + ")");
+
+        addTableRow(tresoTable, "Variation FRNG",
+            formatAmount(tafire.getVariationTresorerie().getVariationFRNG()));
+        addTableRow(tresoTable, "Variation BFR",
+            formatAmount(tafire.getVariationTresorerie().getVariationBFR()));
+
+        addTableTotal(tresoTable, "VARIATION TRÉSORERIE (FRNG - BFR)",
+            formatAmount(tafire.getVariationTresorerie().getVariationTresorerie()));
+
+        addTableRow(tresoTable, "", "");
+        addTableRow(tresoTable, "Trésorerie début exercice",
+            formatAmount(tafire.getVariationTresorerie().getTresorerieDebut()));
+        addTableRow(tresoTable, "Trésorerie fin exercice",
+            formatAmount(tafire.getVariationTresorerie().getTresorerieFin()));
+
+        document.add(tresoTable);
+
+        // Vérification
+        if (tafire.getIsBalanced()) {
+            document.add(new Paragraph("\n✓ TAFIRE vérifié et équilibré")
+                .setFontSize(11)
+                .setBold()
+                .setFontColor(ColorConstants.GREEN));
+        } else {
+            document.add(new Paragraph("\n⚠ ATTENTION: Écart de cohérence détecté")
+                .setFontSize(11)
+                .setBold()
+                .setFontColor(ColorConstants.RED));
+        }
+
+        // Analyse automatique
+        if (tafire.getAnalysisComment() != null && !tafire.getAnalysisComment().isEmpty()) {
+            document.add(new Paragraph("\nANALYSE")
+                .setFontSize(12)
+                .setBold()
+                .setMarginTop(15));
+            document.add(new Paragraph(tafire.getAnalysisComment())
+                .setFontSize(10));
+        }
+
+        // Pied de page
+        document.add(new Paragraph("\nDocument généré le " + LocalDate.now().format(DATE_FORMATTER))
+            .setFontSize(9)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setMarginTop(20));
+
+        document.add(new Paragraph("Rapport conforme OHADA")
+            .setFontSize(9)
+            .setTextAlignment(TextAlignment.RIGHT));
+
+        document.close();
+
+        log.info("Export PDF du TAFIRE terminé - {} octets", baos.size());
+        return baos.toByteArray();
+    }
+
+    /**
+     * Exporte le TAFIRE en Excel
+     */
+    public byte[] exportTAFIREToExcel(Long companyId, Integer fiscalYear) throws IOException {
+        log.info("Export du TAFIRE en Excel pour l'entreprise {} - exercice {}", companyId, fiscalYear);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.TAFIREResponse tafire = tafireService.generateTAFIRE(companyId, fiscalYear);
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("TAFIRE " + fiscalYear);
+
+            // Styles
+            CellStyle headerStyle = createHeaderStyle(workbook);
+            CellStyle titleStyle = createTitleStyle(workbook);
+            CellStyle totalStyle = createTotalStyle(workbook);
+            CellStyle currencyStyle = createCurrencyStyle(workbook);
+
+            int rowNum = 0;
+
+            // Titre
+            Row titleRow = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("TABLEAU FINANCIER DES RESSOURCES ET EMPLOIS (TAFIRE)");
+            titleCell.setCellStyle(titleStyle);
+
+            // Entreprise
+            Row companyRow = sheet.createRow(rowNum++);
+            companyRow.createCell(0).setCellValue(company.getName());
+
+            // Exercice
+            Row yearRow = sheet.createRow(rowNum++);
+            yearRow.createCell(0).setCellValue("Exercice " + fiscalYear);
+
+            rowNum++; // Ligne vide
+
+            // I. RESSOURCES STABLES
+            Row ressourcesHeader = sheet.createRow(rowNum++);
+            ressourcesHeader.createCell(0).setCellValue("I. RESSOURCES STABLES");
+            ressourcesHeader.getCell(0).setCellStyle(headerStyle);
+
+            Row ressourcesColHeader = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell rcol1 = ressourcesColHeader.createCell(0);
+            rcol1.setCellValue("Description");
+            rcol1.setCellStyle(headerStyle);
+            org.apache.poi.ss.usermodel.Cell rcol2 = ressourcesColHeader.createCell(1);
+            rcol2.setCellValue("Montant (" + tafire.getCurrency() + ")");
+            rcol2.setCellStyle(headerStyle);
+
+            addExcelRow(sheet, rowNum++, "A. Ressources internes", BigDecimal.ZERO, currencyStyle);
+            addExcelRow(sheet, rowNum++, "  Capacité d'autofinancement (CAF)",
+                tafire.getRessourcesStables().getCaf().getCafTotal(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "  Cessions d'immobilisations",
+                tafire.getRessourcesStables().getCessionsImmobilisations(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "B. Ressources externes", BigDecimal.ZERO, currencyStyle);
+            addExcelRow(sheet, rowNum++, "  Augmentation de capital",
+                tafire.getRessourcesStables().getAugmentationCapital(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "  Emprunts à long terme",
+                tafire.getRessourcesStables().getEmpruntsLongTerme(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "  Subventions d'investissement",
+                tafire.getRessourcesStables().getSubventionsInvestissement(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "TOTAL RESSOURCES STABLES",
+                tafire.getRessourcesStables().getTotalRessourcesStables(), totalStyle);
+
+            rowNum++; // Ligne vide
+
+            // II. EMPLOIS STABLES
+            Row emploisHeader = sheet.createRow(rowNum++);
+            emploisHeader.createCell(0).setCellValue("II. EMPLOIS STABLES");
+            emploisHeader.getCell(0).setCellStyle(headerStyle);
+
+            Row emploisColHeader = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell ecol1 = emploisColHeader.createCell(0);
+            ecol1.setCellValue("Description");
+            ecol1.setCellStyle(headerStyle);
+            org.apache.poi.ss.usermodel.Cell ecol2 = emploisColHeader.createCell(1);
+            ecol2.setCellValue("Montant (" + tafire.getCurrency() + ")");
+            ecol2.setCellStyle(headerStyle);
+
+            addExcelRow(sheet, rowNum++, "Acquisitions immobilisations incorporelles",
+                tafire.getEmploisStables().getAcquisitionsImmobilisationsIncorporelles(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Acquisitions immobilisations corporelles",
+                tafire.getEmploisStables().getAcquisitionsImmobilisationsCorporelles(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Acquisitions immobilisations financières",
+                tafire.getEmploisStables().getAcquisitionsImmobilisationsFinancieres(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Remboursements emprunts long terme",
+                tafire.getEmploisStables().getRemboursementsEmpruntsLongTerme(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Dividendes versés",
+                tafire.getEmploisStables().getDividendesVerses(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "TOTAL EMPLOIS STABLES",
+                tafire.getEmploisStables().getTotalEmploisStables(), totalStyle);
+
+            rowNum++; // Ligne vide
+
+            // III. VARIATION FRNG
+            Row frngHeader = sheet.createRow(rowNum++);
+            frngHeader.createCell(0).setCellValue("III. VARIATION FRNG");
+            frngHeader.getCell(0).setCellStyle(headerStyle);
+
+            addExcelRow(sheet, rowNum++, "VARIATION FRNG (Ressources - Emplois)",
+                tafire.getVariationFRNG(), totalStyle);
+
+            rowNum++; // Ligne vide
+
+            // IV. VARIATION BFR
+            Row bfrHeader = sheet.createRow(rowNum++);
+            bfrHeader.createCell(0).setCellValue("IV. VARIATION BFR");
+            bfrHeader.getCell(0).setCellStyle(headerStyle);
+
+            addExcelRow(sheet, rowNum++, "BFR exercice N",
+                tafire.getVariationBFR().getBfrExerciceN(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "BFR exercice N-1",
+                tafire.getVariationBFR().getBfrExerciceN1(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "VARIATION BFR (N - N-1)",
+                tafire.getVariationBFR().getVariationBFR(), totalStyle);
+
+            rowNum++; // Ligne vide
+
+            // V. VARIATION TRÉSORERIE
+            Row tresoHeader = sheet.createRow(rowNum++);
+            tresoHeader.createCell(0).setCellValue("V. VARIATION TRÉSORERIE");
+            tresoHeader.getCell(0).setCellStyle(headerStyle);
+
+            addExcelRow(sheet, rowNum++, "Variation FRNG",
+                tafire.getVariationTresorerie().getVariationFRNG(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Variation BFR",
+                tafire.getVariationTresorerie().getVariationBFR(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "VARIATION TRÉSORERIE (FRNG - BFR)",
+                tafire.getVariationTresorerie().getVariationTresorerie(), totalStyle);
+
+            rowNum++; // Ligne vide
+            addExcelRow(sheet, rowNum++, "Trésorerie début exercice",
+                tafire.getVariationTresorerie().getTresorerieDebut(), currencyStyle);
+            addExcelRow(sheet, rowNum++, "Trésorerie fin exercice",
+                tafire.getVariationTresorerie().getTresorerieFin(), currencyStyle);
+
+            // Auto-size columns
+            sheet.autoSizeColumn(0);
+            sheet.autoSizeColumn(1);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            workbook.write(baos);
+
+            log.info("Export Excel du TAFIRE terminé - {} octets", baos.size());
+            return baos.toByteArray();
+        }
+    }
+
+    // ==================== JOURNAUX AUXILIAIRES (PRIORITÉ 2) ====================
+
+    /**
+     * Exporte le journal des ventes (VE) en PDF
+     */
+    public byte[] exportSalesJournalToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du journal des ventes en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getSalesJournal(companyId, startDate, endDate);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL DES VENTES (VE)");
+    }
+
+    /**
+     * Exporte le journal des achats (AC) en PDF
+     */
+    public byte[] exportPurchasesJournalToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du journal des achats en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getPurchasesJournal(companyId, startDate, endDate);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL DES ACHATS (AC)");
+    }
+
+    /**
+     * Exporte le journal de banque (BQ) en PDF
+     */
+    public byte[] exportBankJournalToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du journal de banque en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getBankJournal(companyId, startDate, endDate);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL DE BANQUE (BQ)");
+    }
+
+    /**
+     * Exporte le journal de caisse (CA) en PDF
+     */
+    public byte[] exportCashJournalToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du journal de caisse en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getCashJournal(companyId, startDate, endDate);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL DE CAISSE (CA)");
+    }
+
+    /**
+     * Exporte le journal des opérations diverses (OD) en PDF
+     */
+    public byte[] exportGeneralJournalToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du journal des opérations diverses en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getGeneralJournal(companyId, startDate, endDate);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL DES OPÉRATIONS DIVERSES (OD)");
+    }
+
+    /**
+     * Exporte le journal à nouveaux (AN) en PDF
+     */
+    public byte[] exportOpeningJournalToPdf(Long companyId, Integer fiscalYear) throws IOException {
+        log.info("Export du journal à nouveaux en PDF pour l'entreprise {} - exercice {}",
+            companyId, fiscalYear);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getOpeningJournal(companyId, fiscalYear);
+
+        return exportAuxiliaryJournalToPdf(company, journal, "JOURNAL À NOUVEAUX (AN)");
+    }
+
+    /**
+     * Méthode générique pour exporter un journal auxiliaire en PDF
+     */
+    private byte[] exportAuxiliaryJournalToPdf(Company company,
+                                              com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal,
+                                              String title) throws IOException {
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête
+        document.add(new Paragraph(title)
+            .setFontSize(16)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(company.getName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        String period = journal.getStartDate() != null && journal.getEndDate() != null
+            ? "Du " + journal.getStartDate().format(DATE_FORMATTER) + " au " + journal.getEndDate().format(DATE_FORMATTER)
+            : "Exercice complet";
+
+        document.add(new Paragraph(period)
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // Table des écritures
+        Table table = new Table(UnitValue.createPercentArray(new float[]{1.5f, 2, 1.5f, 3, 1.5f, 1.5f}))
+            .useAllAvailableWidth();
+
+        addTableHeader(table, "Date", "N° Pièce", "Compte", "Libellé", "Débit", "Crédit");
+
+        for (com.predykt.accounting.dto.response.AuxiliaryJournalResponse.JournalEntry entry : journal.getEntries()) {
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getEntryDate().format(DATE_FORMATTER)).setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getPieceNumber() != null ? entry.getPieceNumber() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getAccountNumber() != null ? entry.getAccountNumber() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(entry.getDescription() != null ? entry.getDescription() : "").setFontSize(8)));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(formatAmount(entry.getDebitAmount())).setFontSize(8))
+                .setTextAlignment(TextAlignment.RIGHT));
+            table.addCell(new com.itextpdf.layout.element.Cell().add(
+                new Paragraph(formatAmount(entry.getCreditAmount())).setFontSize(8))
+                .setTextAlignment(TextAlignment.RIGHT));
+        }
+
+        // Ligne de totaux
+        com.itextpdf.layout.element.Cell totalLabelCell = new com.itextpdf.layout.element.Cell(1, 4)
+            .add(new Paragraph("TOTAUX").setBold())
+            .setBackgroundColor(ColorConstants.LIGHT_GRAY);
+        table.addCell(totalLabelCell);
+
+        addTableCell(table, formatAmount(journal.getTotalDebit()), true);
+        addTableCell(table, formatAmount(journal.getTotalCredit()), true);
+
+        document.add(table);
+
+        // Statistiques
+        document.add(new Paragraph("\nSTATISTIQUES")
+            .setFontSize(12)
+            .setBold()
+            .setMarginTop(15));
+
+        document.add(new Paragraph("Nombre d'écritures: " + journal.getNumberOfEntries())
+            .setFontSize(10));
+
+        if (journal.getStatistics() != null) {
+            com.predykt.accounting.dto.response.AuxiliaryJournalResponse.JournalStatistics stats = journal.getStatistics();
+
+            if (stats.getTotalSalesTTC() != null) {
+                document.add(new Paragraph("Total ventes TTC: " + formatAmount(stats.getTotalSalesTTC()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+                document.add(new Paragraph("TVA collectée: " + formatAmount(stats.getTotalVATCollected()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+            }
+
+            if (stats.getTotalPurchasesTTC() != null) {
+                document.add(new Paragraph("Total achats TTC: " + formatAmount(stats.getTotalPurchasesTTC()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+                document.add(new Paragraph("TVA déductible: " + formatAmount(stats.getTotalVATDeductible()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+            }
+
+            if (stats.getNetCashFlow() != null) {
+                document.add(new Paragraph("Flux net: " + formatAmount(stats.getNetCashFlow()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+                document.add(new Paragraph("Solde d'ouverture: " + formatAmount(stats.getOpeningBalance()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+                document.add(new Paragraph("Solde de clôture: " + formatAmount(stats.getClosingBalance()) + " " + journal.getCurrency())
+                    .setFontSize(10));
+            }
+        }
+
+        // Vérification équilibre
+        if (journal.getIsBalanced() != null) {
+            document.add(new Paragraph(journal.getIsBalanced() ? "\n✓ Journal équilibré" : "\n⚠ Journal déséquilibré")
+                .setFontSize(11)
+                .setBold()
+                .setFontColor(journal.getIsBalanced() ? ColorConstants.GREEN : ColorConstants.RED)
+                .setMarginTop(10));
+        }
+
+        // Pied de page
+        document.add(new Paragraph("\nDocument généré le " + LocalDate.now().format(DATE_FORMATTER))
+            .setFontSize(9)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setMarginTop(20));
+
+        document.add(new Paragraph("Journal conforme OHADA")
+            .setFontSize(9)
+            .setTextAlignment(TextAlignment.RIGHT));
+
+        document.close();
+
+        log.info("Export PDF du journal {} terminé - {} écritures, {} octets",
+            journal.getJournalCode(), journal.getNumberOfEntries(), baos.size());
+
+        return baos.toByteArray();
+    }
+
+    /**
+     * Exporte le journal des ventes (VE) en Excel
+     */
+    public byte[] exportSalesJournalToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getSalesJournal(companyId, startDate, endDate);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal Ventes");
+    }
+
+    /**
+     * Exporte le journal des achats (AC) en Excel
+     */
+    public byte[] exportPurchasesJournalToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getPurchasesJournal(companyId, startDate, endDate);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal Achats");
+    }
+
+    /**
+     * Exporte le journal de banque (BQ) en Excel
+     */
+    public byte[] exportBankJournalToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getBankJournal(companyId, startDate, endDate);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal Banque");
+    }
+
+    /**
+     * Exporte le journal de caisse (CA) en Excel
+     */
+    public byte[] exportCashJournalToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getCashJournal(companyId, startDate, endDate);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal Caisse");
+    }
+
+    /**
+     * Exporte le journal des opérations diverses (OD) en Excel
+     */
+    public byte[] exportGeneralJournalToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getGeneralJournal(companyId, startDate, endDate);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal Opé. Div.");
+    }
+
+    /**
+     * Exporte le journal à nouveaux (AN) en Excel
+     */
+    public byte[] exportOpeningJournalToExcel(Long companyId, Integer fiscalYear) throws IOException {
+        com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal =
+            auxiliaryJournalsService.getOpeningJournal(companyId, fiscalYear);
+        return exportAuxiliaryJournalToExcel(companyId, journal, "Journal À Nouveaux");
+    }
+
+    /**
+     * Méthode générique pour exporter un journal auxiliaire en Excel
+     */
+    private byte[] exportAuxiliaryJournalToExcel(Long companyId,
+                                                 com.predykt.accounting.dto.response.AuxiliaryJournalResponse journal,
+                                                 String sheetName) throws IOException {
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet(sheetName);
+
+            // Styles
+            CellStyle headerStyle = createHeaderStyle(workbook);
+            CellStyle titleStyle = createTitleStyle(workbook);
+            CellStyle totalStyle = createTotalStyle(workbook);
+            CellStyle currencyStyle = createCurrencyStyle(workbook);
+
+            int rowNum = 0;
+
+            // Titre
+            Row titleRow = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue(journal.getJournalName());
+            titleCell.setCellStyle(titleStyle);
+
+            // Entreprise
+            Row companyRow = sheet.createRow(rowNum++);
+            companyRow.createCell(0).setCellValue(company.getName());
+
+            // Période
+            if (journal.getStartDate() != null && journal.getEndDate() != null) {
+                Row periodRow = sheet.createRow(rowNum++);
+                periodRow.createCell(0).setCellValue("Du " + journal.getStartDate().format(DATE_FORMATTER) +
+                    " au " + journal.getEndDate().format(DATE_FORMATTER));
+            }
+
+            rowNum++; // Ligne vide
+
+            // En-têtes de colonnes
+            Row headerRow = sheet.createRow(rowNum++);
+            String[] headers = {"Date", "N° Pièce", "Compte", "Libellé", "Débit", "Crédit"};
+
+            for (int i = 0; i < headers.length; i++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            // Données
+            for (com.predykt.accounting.dto.response.AuxiliaryJournalResponse.JournalEntry entry : journal.getEntries()) {
+                Row dataRow = sheet.createRow(rowNum++);
+                int colNum = 0;
+
+                dataRow.createCell(colNum++).setCellValue(entry.getEntryDate().format(DATE_FORMATTER));
+                dataRow.createCell(colNum++).setCellValue(entry.getPieceNumber() != null ? entry.getPieceNumber() : "");
+                dataRow.createCell(colNum++).setCellValue(entry.getAccountNumber() != null ? entry.getAccountNumber() : "");
+                dataRow.createCell(colNum++).setCellValue(entry.getDescription() != null ? entry.getDescription() : "");
+
+                org.apache.poi.ss.usermodel.Cell debitCell = dataRow.createCell(colNum++);
+                debitCell.setCellValue(entry.getDebitAmount() != null ? entry.getDebitAmount().doubleValue() : 0.0);
+                debitCell.setCellStyle(currencyStyle);
+
+                org.apache.poi.ss.usermodel.Cell creditCell = dataRow.createCell(colNum++);
+                creditCell.setCellValue(entry.getCreditAmount() != null ? entry.getCreditAmount().doubleValue() : 0.0);
+                creditCell.setCellStyle(currencyStyle);
+            }
+
+            // Ligne de totaux
+            Row totalRow = sheet.createRow(rowNum++);
+            org.apache.poi.ss.usermodel.Cell totalLabelCell = totalRow.createCell(0);
+            totalLabelCell.setCellValue("TOTAUX");
+            totalLabelCell.setCellStyle(totalStyle);
+
+            totalRow.createCell(1).setCellStyle(totalStyle);
+            totalRow.createCell(2).setCellStyle(totalStyle);
+            totalRow.createCell(3).setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalDebitCell = totalRow.createCell(4);
+            totalDebitCell.setCellValue(journal.getTotalDebit() != null ? journal.getTotalDebit().doubleValue() : 0.0);
+            totalDebitCell.setCellStyle(totalStyle);
+
+            org.apache.poi.ss.usermodel.Cell totalCreditCell = totalRow.createCell(5);
+            totalCreditCell.setCellValue(journal.getTotalCredit() != null ? journal.getTotalCredit().doubleValue() : 0.0);
+            totalCreditCell.setCellStyle(totalStyle);
+
+            // Auto-size columns
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            workbook.write(baos);
+
+            log.info("Export Excel du journal {} terminé - {} écritures, {} octets",
+                journal.getJournalCode(), journal.getNumberOfEntries(), baos.size());
+
             return baos.toByteArray();
         }
     }

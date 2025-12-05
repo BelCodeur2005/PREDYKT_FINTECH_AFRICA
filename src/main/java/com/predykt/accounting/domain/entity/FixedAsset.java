@@ -1,96 +1,128 @@
 package com.predykt.accounting.domain.entity;
 
+import com.predykt.accounting.domain.enums.AssetCategory;
+import com.predykt.accounting.domain.enums.DepreciationMethod;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import lombok.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 
 /**
- * Entité représentant une immobilisation (Fixed Asset)
+ * Entité représentant une immobilisation (Fixed Asset) conforme OHADA
  * Gestion du patrimoine immobilisé de l'entreprise
+ *
+ * Classes de comptes OHADA:
+ * - Classe 21: Immobilisations incorporelles
+ * - Classe 22: Terrains
+ * - Classe 23: Bâtiments, installations techniques et agencements
+ * - Classe 24: Matériel
+ * - Classe 26: Immobilisations financières
+ * - Classe 28: Amortissements des immobilisations
  */
 @Entity
-@Table(name = "fixed_assets")
+@Table(name = "fixed_assets", indexes = {
+    @Index(name = "idx_fixed_assets_company", columnList = "company_id"),
+    @Index(name = "idx_fixed_assets_active", columnList = "company_id, is_active"),
+    @Index(name = "idx_fixed_assets_category", columnList = "company_id, category"),
+    @Index(name = "idx_fixed_assets_account", columnList = "account_number"),
+    @Index(name = "idx_fixed_assets_acquisition_date", columnList = "acquisition_date")
+}, uniqueConstraints = {
+    @UniqueConstraint(name = "uk_fixed_asset_number", columnNames = {"company_id", "asset_number"})
+})
 @Data
-@Builder
+@EqualsAndHashCode(callSuper = true)
 @NoArgsConstructor
 @AllArgsConstructor
-public class FixedAsset {
+@Builder
+public class FixedAsset extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "company_id", nullable = false)
+    @JoinColumn(name = "company_id", nullable = false, foreignKey = @ForeignKey(name = "fk_fixed_asset_company"))
+    @NotNull(message = "L'entreprise est obligatoire")
     private Company company;
 
+    @NotBlank(message = "Le numéro d'immobilisation est obligatoire")
     @Column(name = "asset_number", nullable = false, length = 50)
-    private String assetNumber;
+    private String assetNumber; // Ex: IMM-2024-001
 
-    @Column(name = "asset_name", nullable = false)
-    private String assetName;
+    @NotBlank(message = "Le nom de l'immobilisation est obligatoire")
+    @Column(name = "asset_name", nullable = false, length = 255)
+    private String assetName; // Ex: Véhicule Renault Duster
 
-    @Column(name = "description", columnDefinition = "TEXT")
-    private String description;
+    @Column(columnDefinition = "TEXT")
+    private String description; // Description détaillée
 
-    /**
-     * Catégorie d'immobilisation
-     */
     @Enumerated(EnumType.STRING)
-    @Column(name = "category", nullable = false, length = 50)
+    @Column(nullable = false, length = 50)
+    @NotNull(message = "La catégorie est obligatoire")
     private AssetCategory category;
 
-    /**
-     * Numéro de compte OHADA (21x, 22x, 23x, 24x, 25x)
-     */
+    @NotBlank(message = "Le numéro de compte OHADA est obligatoire")
     @Column(name = "account_number", nullable = false, length = 20)
-    private String accountNumber;
+    private String accountNumber; // Ex: 2410 (Matériel et outillage)
+
+    @Column(name = "supplier_name", length = 200)
+    private String supplierName; // Fournisseur
+
+    @Column(name = "invoice_number", length = 100)
+    private String invoiceNumber; // Numéro facture d'achat
 
     // === ACQUISITION ===
 
+    @NotNull(message = "La date d'acquisition est obligatoire")
     @Column(name = "acquisition_date", nullable = false)
     private LocalDate acquisitionDate;
 
+    @NotNull(message = "Le coût d'acquisition est obligatoire")
+    @DecimalMin(value = "0.01", message = "Le coût d'acquisition doit être positif")
     @Column(name = "acquisition_cost", nullable = false, precision = 20, scale = 2)
-    private BigDecimal acquisitionCost;
+    private BigDecimal acquisitionCost; // Valeur brute
 
-    @Column(name = "supplier_name", length = 255)
-    private String supplierName;
+    @Column(name = "acquisition_vat", precision = 20, scale = 2)
+    @Builder.Default
+    private BigDecimal acquisitionVat = BigDecimal.ZERO;
+
+    @Column(name = "installation_cost", precision = 20, scale = 2)
+    @Builder.Default
+    private BigDecimal installationCost = BigDecimal.ZERO;
+
+    @Column(name = "total_cost", precision = 20, scale = 2)
+    private BigDecimal totalCost; // Calculé automatiquement
 
     // === AMORTISSEMENT ===
 
-    /**
-     * Méthode d'amortissement
-     */
     @Enumerated(EnumType.STRING)
     @Column(name = "depreciation_method", nullable = false, length = 30)
-    private DepreciationMethod depreciationMethod;
+    @NotNull(message = "La méthode d'amortissement est obligatoire")
+    @Builder.Default
+    private DepreciationMethod depreciationMethod = DepreciationMethod.LINEAR;
 
-    /**
-     * Durée d'utilité en années
-     */
+    @NotNull(message = "La durée de vie utile est obligatoire")
+    @Positive(message = "La durée de vie doit être positive")
     @Column(name = "useful_life_years", nullable = false)
     private Integer usefulLifeYears;
 
-    /**
-     * Valeur résiduelle (valeur de récupération estimée)
-     */
+    @Column(name = "depreciation_rate", precision = 10, scale = 4)
+    private BigDecimal depreciationRate; // Calculé automatiquement
+
     @Column(name = "residual_value", precision = 20, scale = 2)
-    private BigDecimal residualValue;
+    @Builder.Default
+    private BigDecimal residualValue = BigDecimal.ZERO;
 
-    /**
-     * Taux d'amortissement annuel (calculé automatiquement)
-     */
-    @Column(name = "depreciation_rate", precision = 5, scale = 4)
-    private BigDecimal depreciationRate;
+    @Column(name = "depreciation_start_date")
+    private LocalDate depreciationStartDate;
 
-    // === CESSION/MISE AU REBUT ===
+    // === CESSION / SORTIE ===
 
     @Column(name = "disposal_date")
     private LocalDate disposalDate;
@@ -98,87 +130,96 @@ public class FixedAsset {
     @Column(name = "disposal_amount", precision = 20, scale = 2)
     private BigDecimal disposalAmount;
 
-    @Column(name = "disposal_reason", length = 255)
+    @Column(name = "disposal_reason", length = 500)
     private String disposalReason;
 
-    // === LOCALISATION ET RESPONSABLE ===
+    // === LOCALISATION ===
 
-    @Column(name = "location", length = 255)
+    @Column(length = 200)
     private String location;
-
-    @Column(name = "responsible_person", length = 255)
-    private String responsiblePerson;
 
     @Column(name = "department", length = 100)
     private String department;
 
-    // === STATUT ===
+    @Column(name = "responsible_person", length = 200)
+    private String responsiblePerson;
+
+    // === STATUTS ===
 
     @Column(name = "is_active", nullable = false)
-    private Boolean isActive;
+    @Builder.Default
+    private Boolean isActive = true;
 
     @Column(name = "is_fully_depreciated", nullable = false)
-    private Boolean isFullyDepreciated;
+    @Builder.Default
+    private Boolean isFullyDepreciated = false;
 
-    // === AUDIT ===
+    // === INFORMATIONS COMPLÉMENTAIRES ===
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    @Column(name = "serial_number", length = 100)
+    private String serialNumber;
 
-    @Column(name = "created_by", length = 255)
-    private String createdBy;
+    @Column(name = "registration_number", length = 100)
+    private String registrationNumber; // Immatriculation (véhicules)
 
-    @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
-
-    @Column(name = "updated_by", length = 255)
-    private String updatedBy;
-
-    @Column(name = "notes", columnDefinition = "TEXT")
+    @Column(columnDefinition = "TEXT")
     private String notes;
 
     // === HOOKS ===
 
     @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        if (isActive == null) isActive = true;
-        if (isFullyDepreciated == null) isFullyDepreciated = false;
-        if (residualValue == null) residualValue = BigDecimal.ZERO;
-        calculateDepreciationRate();
-    }
-
     @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+    private void calculateValues() {
+        // Calcul du coût total
+        if (acquisitionCost != null) {
+            BigDecimal total = acquisitionCost;
+            if (installationCost != null) {
+                total = total.add(installationCost);
+            }
+            this.totalCost = total;
+        }
+
+        // Calcul du taux d'amortissement
+        if (depreciationRate == null && usefulLifeYears != null && usefulLifeYears > 0) {
+            if (depreciationMethod == DepreciationMethod.LINEAR) {
+                this.depreciationRate = BigDecimal.valueOf(100.0)
+                    .divide(BigDecimal.valueOf(usefulLifeYears), 4, RoundingMode.HALF_UP);
+            } else if (depreciationMethod == DepreciationMethod.DECLINING_BALANCE) {
+                BigDecimal coefficient = depreciationMethod.getDecliningBalanceCoefficient(usefulLifeYears);
+                BigDecimal linearRate = BigDecimal.valueOf(100.0)
+                    .divide(BigDecimal.valueOf(usefulLifeYears), 4, RoundingMode.HALF_UP);
+                this.depreciationRate = linearRate.multiply(coefficient);
+            }
+        }
+
+        // Date de début d'amortissement par défaut
+        if (depreciationStartDate == null && acquisitionDate != null) {
+            this.depreciationStartDate = acquisitionDate;
+        }
     }
 
     // === MÉTHODES MÉTIER ===
 
     /**
-     * Calculer le taux d'amortissement annuel
-     */
-    public void calculateDepreciationRate() {
-        if (usefulLifeYears != null && usefulLifeYears > 0) {
-            if (depreciationMethod == DepreciationMethod.LINEAR) {
-                // Linéaire: 1 / durée
-                this.depreciationRate = BigDecimal.ONE
-                    .divide(new BigDecimal(usefulLifeYears), 4, java.math.RoundingMode.HALF_UP);
-            } else if (depreciationMethod == DepreciationMethod.DECLINING_BALANCE) {
-                // Dégressif: taux = (1 / durée) × coefficient (généralement 2 ou 2.5)
-                BigDecimal coefficient = new BigDecimal("2.0");
-                this.depreciationRate = BigDecimal.ONE
-                    .divide(new BigDecimal(usefulLifeYears), 4, java.math.RoundingMode.HALF_UP)
-                    .multiply(coefficient);
-            }
-        }
-    }
-
-    /**
      * Calculer la base amortissable
      */
     public BigDecimal getDepreciableAmount() {
-        return acquisitionCost.subtract(residualValue);
+        BigDecimal base = totalCost != null ? totalCost : acquisitionCost;
+        return base.subtract(residualValue != null ? residualValue : BigDecimal.ZERO);
+    }
+
+    /**
+     * Vérifier si l'immobilisation est encore en service
+     */
+    public boolean isInService() {
+        return isActive && disposalDate == null;
+    }
+
+    /**
+     * Vérifier si l'immobilisation peut être amortie
+     */
+    public boolean isDepreciable() {
+        return isInService() && !isFullyDepreciated && category.getIsDepreciable();
     }
 
     /**
@@ -186,61 +227,5 @@ public class FixedAsset {
      */
     public boolean isDisposed() {
         return disposalDate != null;
-    }
-
-    // === ENUMS ===
-
-    /**
-     * Catégories d'immobilisations selon OHADA
-     */
-    public enum AssetCategory {
-        INTANGIBLE("Immobilisations incorporelles", "21"),
-        LAND("Terrains", "22"),
-        BUILDING("Bâtiments", "23"),
-        EQUIPMENT("Matériel et outillage", "24"),
-        VEHICLE("Matériel de transport", "245"),
-        FURNITURE("Mobilier et matériel de bureau", "2441"),
-        IT_EQUIPMENT("Matériel informatique", "2443"),
-        FINANCIAL("Immobilisations financières", "26");
-
-        private final String displayName;
-        private final String accountPrefix;
-
-        AssetCategory(String displayName, String accountPrefix) {
-            this.displayName = displayName;
-            this.accountPrefix = accountPrefix;
-        }
-
-        public String getDisplayName() {
-            return displayName;
-        }
-
-        public String getAccountPrefix() {
-            return accountPrefix;
-        }
-    }
-
-    /**
-     * Méthodes d'amortissement
-     */
-    public enum DepreciationMethod {
-        LINEAR("Linéaire", "Amortissement constant sur toute la durée"),
-        DECLINING_BALANCE("Dégressif", "Amortissement décroissant (coefficient 2x)");
-
-        private final String displayName;
-        private final String description;
-
-        DepreciationMethod(String displayName, String description) {
-            this.displayName = displayName;
-            this.description = description;
-        }
-
-        public String getDisplayName() {
-            return displayName;
-        }
-
-        public String getDescription() {
-            return description;
-        }
     }
 }

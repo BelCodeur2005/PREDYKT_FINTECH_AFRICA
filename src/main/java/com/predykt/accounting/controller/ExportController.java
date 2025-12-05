@@ -258,4 +258,503 @@ public class ExportController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
+    // ==================== BALANCE DE VÉRIFICATION ====================
+
+    @GetMapping("/trial-balance/pdf")
+    @Operation(summary = "Exporter la balance de vérification en PDF",
+               description = "Génère et télécharge la balance de vérification au format PDF conforme OHADA")
+    public ResponseEntity<byte[]> exportTrialBalanceToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportTrialBalanceToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("balance-verification_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/trial-balance/excel")
+    @Operation(summary = "Exporter la balance de vérification en Excel",
+               description = "Génère et télécharge la balance de vérification au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportTrialBalanceToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportTrialBalanceToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("balance-verification_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/general-ledger/pdf")
+    @Operation(summary = "Exporter le grand livre en PDF",
+               description = "Génère et télécharge le grand livre complet au format PDF")
+    public ResponseEntity<byte[]> exportGeneralLedgerToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportGeneralLedgerToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("grand-livre_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/ratios/excel")
+    @Operation(summary = "Exporter l'historique des ratios financiers en Excel",
+               description = "Génère et télécharge l'historique complet des ratios financiers au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportRatiosHistoryToExcel(@PathVariable Long companyId) {
+
+        try {
+            byte[] excelData = exportService.exportRatiosHistoryToExcel(companyId);
+
+            String filename = String.format("historique-ratios_%s_%s.xlsx",
+                companyId,
+                LocalDate.now().format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    // ==================== TAFIRE (PRIORITÉ 2) ====================
+
+    @GetMapping("/tafire/pdf")
+    @Operation(summary = "Exporter le TAFIRE en PDF",
+               description = "Génère et télécharge le Tableau Financier des Ressources et Emplois (TAFIRE) au format PDF - Conforme OHADA")
+    public ResponseEntity<byte[]> exportTAFIREToPdf(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] pdfData = exportService.exportTAFIREToPdf(companyId, fiscalYear);
+
+            String filename = String.format("tafire_%s_%d.pdf", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/tafire/excel")
+    @Operation(summary = "Exporter le TAFIRE en Excel",
+               description = "Génère et télécharge le Tableau Financier des Ressources et Emplois (TAFIRE) au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportTAFIREToExcel(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] excelData = exportService.exportTAFIREToExcel(companyId, fiscalYear);
+
+            String filename = String.format("tafire_%s_%d.xlsx", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    // ==================== JOURNAUX AUXILIAIRES (PRIORITÉ 2) ====================
+
+    @GetMapping("/journals/sales/pdf")
+    @Operation(summary = "Exporter le journal des ventes (VE) en PDF",
+               description = "Génère et télécharge le journal des ventes au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportSalesJournalToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportSalesJournalToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("journal-ventes_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/sales/excel")
+    @Operation(summary = "Exporter le journal des ventes (VE) en Excel",
+               description = "Génère et télécharge le journal des ventes au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportSalesJournalToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportSalesJournalToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("journal-ventes_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/purchases/pdf")
+    @Operation(summary = "Exporter le journal des achats (AC) en PDF",
+               description = "Génère et télécharge le journal des achats au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportPurchasesJournalToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportPurchasesJournalToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("journal-achats_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/purchases/excel")
+    @Operation(summary = "Exporter le journal des achats (AC) en Excel",
+               description = "Génère et télécharge le journal des achats au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportPurchasesJournalToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportPurchasesJournalToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("journal-achats_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/bank/pdf")
+    @Operation(summary = "Exporter le journal de banque (BQ) en PDF",
+               description = "Génère et télécharge le journal de banque au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportBankJournalToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportBankJournalToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("journal-banque_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/bank/excel")
+    @Operation(summary = "Exporter le journal de banque (BQ) en Excel",
+               description = "Génère et télécharge le journal de banque au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportBankJournalToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportBankJournalToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("journal-banque_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/cash/pdf")
+    @Operation(summary = "Exporter le journal de caisse (CA) en PDF",
+               description = "Génère et télécharge le journal de caisse au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportCashJournalToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportCashJournalToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("journal-caisse_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/cash/excel")
+    @Operation(summary = "Exporter le journal de caisse (CA) en Excel",
+               description = "Génère et télécharge le journal de caisse au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportCashJournalToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportCashJournalToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("journal-caisse_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/general/pdf")
+    @Operation(summary = "Exporter le journal des opérations diverses (OD) en PDF",
+               description = "Génère et télécharge le journal OD au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportGeneralJournalPdfToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportGeneralJournalToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("journal-od_%s_%s_%s.pdf",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/general/excel")
+    @Operation(summary = "Exporter le journal des opérations diverses (OD) en Excel",
+               description = "Génère et télécharge le journal OD au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportGeneralJournalExcelToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportGeneralJournalToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("journal-od_%s_%s_%s.xlsx",
+                companyId,
+                startDate.format(FILE_DATE_FORMATTER),
+                endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/opening/pdf")
+    @Operation(summary = "Exporter le journal à nouveaux (AN) en PDF",
+               description = "Génère et télécharge le journal à nouveaux au format PDF - OHADA")
+    public ResponseEntity<byte[]> exportOpeningJournalToPdf(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] pdfData = exportService.exportOpeningJournalToPdf(companyId, fiscalYear);
+
+            String filename = String.format("journal-an_%s_%d.pdf", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/journals/opening/excel")
+    @Operation(summary = "Exporter le journal à nouveaux (AN) en Excel",
+               description = "Génère et télécharge le journal à nouveaux au format Excel (.xlsx)")
+    public ResponseEntity<byte[]> exportOpeningJournalToExcel(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] excelData = exportService.exportOpeningJournalToExcel(companyId, fiscalYear);
+
+            String filename = String.format("journal-an_%s_%d.xlsx", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
 }

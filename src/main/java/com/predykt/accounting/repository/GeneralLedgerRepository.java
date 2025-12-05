@@ -109,4 +109,7 @@ public interface GeneralLedgerRepository extends JpaRepository<GeneralLedger, Lo
         @Param("accountPrefix") String accountPrefix,
         @Param("asOfDate") LocalDate asOfDate
     );
+
+    // Compter les pièces commençant par un préfixe (pour génération numéro unique)
+    Long countByCompanyAndPieceNumberStartingWith(Company company, String pieceNumberPrefix);
 }
