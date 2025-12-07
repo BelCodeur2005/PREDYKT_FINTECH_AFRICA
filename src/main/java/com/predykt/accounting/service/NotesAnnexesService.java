@@ -216,13 +216,29 @@ public class NotesAnnexesService {
         // Créances clients (411)
         BigDecimal creancesClients = getAccountBalance(company, "411", endDate);
 
+        // ✅ AMÉLIORATION: Calcul AUTOMATIQUE des créances douteuses
+        // Règle OHADA: Provisions sur créances > 90 jours
+        BigDecimal echuPlus90Jours = calculateOverdueAmount(company, "411", endDate, 90);
+        BigDecimal creancesDouteuses = echuPlus90Jours.multiply(new BigDecimal("0.50")); // Provision 50%
+
+        // Calcul plus précis des échéances basé sur les vraies dates
+        BigDecimal echu30A90Jours = calculateOverdueAmount(company, "411", endDate, 30)
+            .subtract(echuPlus90Jours);
+        BigDecimal echuMoins30Jours = calculateOverdueAmount(company, "411", endDate, 0)
+            .subtract(echu30A90Jours)
+            .subtract(echuPlus90Jours);
+        BigDecimal aEchoir = creancesClients
+            .subtract(echuMoins30Jours)
+            .subtract(echu30A90Jours)
+            .subtract(echuPlus90Jours);
+
         Note5_CreancesEtDettes.EcheancierCreances creances = Note5_CreancesEtDettes.EcheancierCreances.builder()
             .creancesClients(creancesClients)
-            .aEchoir(creancesClients.multiply(new BigDecimal("0.70"))) // Estimation 70%
-            .echuMoins30Jours(creancesClients.multiply(new BigDecimal("0.20"))) // 20%
-            .echu30A90Jours(creancesClients.multiply(new BigDecimal("0.08"))) // 8%
-            .echuPlus90Jours(creancesClients.multiply(new BigDecimal("0.02"))) // 2%
-            .creancesDouteuses(BigDecimal.ZERO)
+            .aEchoir(aEchoir.max(BigDecimal.ZERO))
+            .echuMoins30Jours(echuMoins30Jours.max(BigDecimal.ZERO))
+            .echu30A90Jours(echu30A90Jours.max(BigDecimal.ZERO))
+            .echuPlus90Jours(echuPlus90Jours.max(BigDecimal.ZERO))
+            .creancesDouteuses(creancesDouteuses)
             .autresCreances(BigDecimal.ZERO)
             .total(creancesClients)
             .build();
@@ -242,8 +258,13 @@ public class NotesAnnexesService {
         return Note5_CreancesEtDettes.builder()
             .creances(creances)
             .dettes(dettes)
-            .provisionsCreancesDouteuses(BigDecimal.ZERO)
-            .commentaire("Les créances et dettes sont comptabilisées à leur valeur nominale")
+            .provisionsCreancesDouteuses(creancesDouteuses)
+            .commentaire(String.format(
+                "Les créances et dettes sont comptabilisées à leur valeur nominale. " +
+                "Provision de %,.0f XAF constituée sur les créances > 90 jours (50%% de %,.0f XAF).",
+                creancesDouteuses.doubleValue(),
+                echuPlus90Jours.doubleValue()
+            ))
             .build();
     }
 
@@ -417,6 +438,35 @@ public class NotesAnnexesService {
 
         return entries.stream()
             .map(entry -> entry.getDebitAmount().subtract(entry.getCreditAmount()))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * ✅ NOUVEAU: Calcule le montant des créances en retard selon l'ancienneté
+     * @param company Entreprise
+     * @param accountPrefix Préfixe compte (411 pour clients, 401 pour fournisseurs)
+     * @param asOfDate Date de référence
+     * @param minDaysOverdue Ancienneté minimale en jours (0, 30, 60, 90)
+     * @return Montant des créances ayant au minimum cette ancienneté
+     */
+    private BigDecimal calculateOverdueAmount(Company company, String accountPrefix,
+                                             LocalDate asOfDate, int minDaysOverdue) {
+        List<GeneralLedger> entries = generalLedgerRepository
+            .findByCompanyAndAccountNumberStartingWithAndEntryDateBefore(company, accountPrefix, asOfDate);
+
+        return entries.stream()
+            .filter(entry -> {
+                // Calculer l'ancienneté de l'écriture
+                long daysOld = ChronoUnit.DAYS.between(entry.getEntryDate(), asOfDate);
+                return daysOld >= minDaysOverdue;
+            })
+            .map(entry -> {
+                // Pour les clients (411): créances = débit - crédit
+                // Pour les fournisseurs (401): dettes = crédit - débit
+                BigDecimal amount = entry.getDebitAmount().subtract(entry.getCreditAmount());
+                return accountPrefix.equals("411") ? amount : amount.abs();
+            })
+            .filter(amount -> amount.compareTo(BigDecimal.ZERO) > 0)  // Uniquement soldes positifs
             .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }

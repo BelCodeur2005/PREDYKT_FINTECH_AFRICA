@@ -97,15 +97,14 @@ public class Payment extends BaseEntity {
 
     // ==================== Détails selon le moyen de paiement ====================
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "bank_account_id")
-    private BankAccount bankAccount;  // Si virement bancaire
+    @Column(name = "bank_account_id")
+    private Long bankAccountId;  // ID du compte bancaire si virement
 
     @Column(name = "cheque_number", length = 50)
     private String chequeNumber;  // Si chèque
 
     @Column(name = "mobile_money_number", length = 20)
-    private String mobileMobilMoneyNumber;  // Si Mobile Money (MTN, Orange)
+    private String mobileMoneyNumber;  // Si Mobile Money (MTN, Orange)
 
     @Column(name = "transaction_reference", length = 100)
     private String transactionReference;  // Référence transaction

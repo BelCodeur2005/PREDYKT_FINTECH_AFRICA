@@ -142,7 +142,10 @@ public class Bill extends BaseEntity {
     private String description;
 
     @Column(columnDefinition = "TEXT")
-    private String notes;
+    private String notes;  // Notes visibles (sur la facture fournisseur)
+
+    @Column(name = "internal_notes", columnDefinition = "TEXT")
+    private String internalNotes;  // ✅ NOUVEAU: Notes comptables internes (NON visibles fournisseur)
 
     // ==================== NIU du fournisseur (copie au moment de la facture) ====================
 

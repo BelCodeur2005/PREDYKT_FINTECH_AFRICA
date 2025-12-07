@@ -140,6 +140,21 @@
             <version>3.7.0</version>
         </dependency>
 
+        <!-- ========== MACHINE LEARNING ========== -->
+        <!-- Smile ML: Java-based machine learning library -->
+        <dependency>
+            <groupId>com.github.haifengl</groupId>
+            <artifactId>smile-core</artifactId>
+            <version>3.0.2</version>
+        </dependency>
+
+        <!-- Apache Commons Math pour statistiques -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+
         <!-- ========== HTTP CLIENT (pour Python API) ========== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

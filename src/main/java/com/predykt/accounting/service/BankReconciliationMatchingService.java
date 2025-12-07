@@ -12,8 +12,11 @@ import com.predykt.accounting.repository.BankReconciliationSuggestionRepository;
 import com.predykt.accounting.repository.BankTransactionRepository;
 import com.predykt.accounting.repository.GeneralLedgerRepository;
 import com.predykt.accounting.service.matching.AdvancedMatchingAlgorithms;
+import com.predykt.accounting.service.ml.MLMatchingService;
+import com.predykt.accounting.dto.ml.MLPredictionResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +56,9 @@ public class BankReconciliationMatchingService {
     private final BankReconciliationSuggestionRepository suggestionRepository;
     private final AdvancedMatchingAlgorithms advancedAlgorithms;
     private final BankReconciliationMatchingConfig config;
+
+    @Autowired(required = false)  // Optional - ML peut être désactivé
+    private MLMatchingService mlMatchingService;
 
     // Variables de contrôle de timeout
     private long analysisStartTime;
@@ -251,6 +257,25 @@ public class BankReconciliationMatchingService {
             }
         }
         log.info("✅ Phase 2 terminée: {} correspondances probables", probableMatches);
+
+        // ========== PHASE 2.4: MATCHING ML (INTELLIGENCE ARTIFICIELLE) ==========
+        log.info("🔍 Phase 2.4: Prédictions ML (Random Forest - Auto-learning)");
+        int mlMatches = 0;
+        if (!checkTimeout() && mlMatchingService != null) {
+            mlMatches = performMLMatching(
+                reconciliation,
+                bankTransactions,
+                glEntries,
+                matchedBankTransactionIds,
+                matchedGLEntryIds,
+                resultBuilder
+            );
+            probableMatches += mlMatches;
+            manualReviewCount += mlMatches;
+            log.info("✅ Phase 2.4 terminée: {} correspondances ML", mlMatches);
+        } else if (mlMatchingService == null) {
+            log.info("ℹ️  Phase 2.4 ignorée: ML désactivé (predykt.ml.enabled=false)");
+        }
 
         // ========== PHASE 2.5: MATCHING MULTIPLE (OPTIMISÉ) ==========
         log.info("🔍 Phase 2.5: Recherche de matching multiple (N-à-1 et 1-à-N) OPTIMISÉ");
@@ -954,6 +979,100 @@ public class BankReconciliationMatchingService {
         }
 
         return builder.build();
+    }
+
+    /**
+     * ✅ NOUVEAU VERSION 3.0: Matching ML (Intelligence Artificielle)
+     * Utilise Random Forest pour prédire les matches automatiquement
+     */
+    private int performMLMatching(
+        BankReconciliation reconciliation,
+        List<BankTransaction> allBankTransactions,
+        List<GeneralLedger> allGlEntries,
+        Set<Long> matchedBankTransactionIds,
+        Set<Long> matchedGLEntryIds,
+        AutoMatchResultDTO.AutoMatchResultDTOBuilder resultBuilder) {
+
+        int matchCount = 0;
+
+        // Filtrer les transactions non matchées
+        List<BankTransaction> unmatchedBT = allBankTransactions.stream()
+            .filter(bt -> !matchedBankTransactionIds.contains(bt.getId()))
+            .collect(Collectors.toList());
+
+        List<GeneralLedger> unmatchedGL = allGlEntries.stream()
+            .filter(gl -> !matchedGLEntryIds.contains(gl.getId()))
+            .collect(Collectors.toList());
+
+        if (unmatchedBT.isEmpty() || unmatchedGL.isEmpty()) {
+            return 0;
+        }
+
+        // Pour chaque transaction bancaire non matchée, prédire le meilleur GL
+        for (BankTransaction bt : unmatchedBT) {
+            if (checkTimeout()) break;
+            if (matchedBankTransactionIds.contains(bt.getId())) continue;
+
+            try {
+                // Utiliser le service ML pour prédire
+                Optional<MLPredictionResult> predictionOpt = mlMatchingService.predictWithFiltering(
+                    bt,
+                    unmatchedGL,
+                    reconciliation.getCompany()
+                );
+
+                if (predictionOpt.isPresent()) {
+                    MLPredictionResult prediction = predictionOpt.get();
+
+                    // Seuil de confiance minimum pour suggestions ML (85%)
+                    if (prediction.getConfidenceScore() >= 85.0) {
+                        GeneralLedger predictedGL = prediction.getGlEntry();
+
+                        // Vérifier si pas déjà matché
+                        if (!matchedGLEntryIds.contains(predictedGL.getId())) {
+                            // Créer la suggestion avec explication ML
+                            MatchScore mlScore = new MatchScore(
+                                BigDecimal.valueOf(prediction.getConfidenceScore()),
+                                Arrays.asList(
+                                    "🤖 Prédiction ML (Random Forest)",
+                                    prediction.getExplanation()
+                                )
+                            );
+
+                            BankReconciliationSuggestion persistedSuggestion = persistSuggestion(
+                                reconciliation,
+                                bt,
+                                predictedGL,
+                                mlScore,
+                                PendingItemType.UNCATEGORIZED
+                            );
+
+                            // Marquer comme ML-generated
+                            persistedSuggestion.setMatchType("ML_PREDICTED");
+                            suggestionRepository.save(persistedSuggestion);
+
+                            MatchSuggestionDTO suggestion = convertToDTO(persistedSuggestion);
+                            resultBuilder.suggestions(addToList(resultBuilder.build().getSuggestions(), suggestion));
+
+                            matchedBankTransactionIds.add(bt.getId());
+                            matchedGLEntryIds.add(predictedGL.getId());
+                            matchCount++;
+
+                            log.info("🤖 ML Match: BT#{} → GL#{} (confiance: {:.1f}%, modèle: {})",
+                                bt.getId(), predictedGL.getId(),
+                                prediction.getConfidenceScore(),
+                                prediction.getModelVersion());
+                        }
+                    }
+                }
+
+            } catch (Exception e) {
+                log.error("Erreur prédiction ML pour BT {}: {}", bt.getId(), e.getMessage());
+                // Continuer avec les autres transactions
+            }
+        }
+
+        return matchCount;
     }
 
     /**

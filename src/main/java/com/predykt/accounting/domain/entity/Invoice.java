@@ -132,7 +132,10 @@ public class Invoice extends BaseEntity {
     private String description;
 
     @Column(columnDefinition = "TEXT")
-    private String notes;
+    private String notes;  // Notes visibles par le client (sur la facture)
+
+    @Column(name = "internal_notes", columnDefinition = "TEXT")
+    private String internalNotes;  // ✅ NOUVEAU: Notes comptables internes (NON visibles client)
 
     @Column(name = "payment_terms", length = 255)
     private String paymentTerms;  // Conditions de paiement
