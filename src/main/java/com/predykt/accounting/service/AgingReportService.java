@@ -184,9 +184,14 @@ public class AgingReportService {
             statusIcon = "✅";
         }
 
-        // Extraire le nom depuis la description ou le compte
-        String name = entries.isEmpty() ? accountNumber :
-            (entries.get(0).getDescription() != null ? entries.get(0).getDescription() : accountNumber);
+        // Extraire le nom depuis le tiers, la description ou le compte
+        // Ordre de priorité: 1. Customer/Supplier name, 2. Description, 3. Account number
+        String name = accountNumber;  // Fallback par défaut
+        if (!entries.isEmpty()) {
+            GeneralLedger firstEntry = entries.get(0);
+            // Utiliser getTiersName() qui gère automatiquement la priorité Customer > Supplier > Description > Account
+            name = firstEntry.getTiersName();
+        }
 
         long oldestDays = ChronoUnit.DAYS.between(oldestDate, asOfDate);
 

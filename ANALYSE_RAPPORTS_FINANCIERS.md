@@ -1354,6 +1354,7 @@ de l'exercice n'est à signaler.
 14. **Livre de paie** (3 jours)
 15. **Tableau de bord graphique** (3 jours)
 
+
 **TOTAL PRIORITÉ 3: ~16 jours**
 
 ---

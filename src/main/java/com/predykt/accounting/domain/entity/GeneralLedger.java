@@ -69,7 +69,41 @@ public class GeneralLedger extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "bank_transaction_id")
     private BankTransaction bankTransaction;  // Lien avec transaction bancaire si réconciliée
-    
+
+    /**
+     * PLAN TIERS - Références optionnelles vers les entités Customer/Supplier
+     * Si NULL, le système utilise la description pour identifier le tiers
+     * IMPORTANT: Ces champs sont OPTIONNELS pour rétrocompatibilité
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "customer_id")
+    private Customer customer;  // Optionnel - Référence vers le client (pour comptes 411xxx)
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id")
+    private Supplier supplier;  // Optionnel - Référence vers le fournisseur (pour comptes 401xxx)
+
+    /**
+     * Retourne le nom du tiers (client ou fournisseur) associé à cette écriture
+     * Ordre de priorité:
+     * 1. Nom du customer si présent
+     * 2. Nom du supplier si présent
+     * 3. Description de l'écriture (fallback)
+     * 4. Numéro de compte (dernier recours)
+     */
+    public String getTiersName() {
+        if (customer != null) {
+            return customer.getName();
+        }
+        if (supplier != null) {
+            return supplier.getName();
+        }
+        if (description != null && !description.trim().isEmpty()) {
+            return description;
+        }
+        return account != null ? account.getAccountNumber() : "N/A";
+    }
+
     /**
      * Validation métier : une écriture doit avoir soit un débit, soit un crédit
      */

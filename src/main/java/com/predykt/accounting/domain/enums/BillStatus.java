@@ -1,23 +1,18 @@
 package com.predykt.accounting.domain.enums;
 
 /**
- * Statuts de facture (Invoice et CabinetInvoice)
+ * Statut de facture fournisseur (Bill)
  */
-public enum InvoiceStatus {
+public enum BillStatus {
     /**
      * Brouillon (en cours de création)
      */
     DRAFT,
 
     /**
-     * Émise (envoyée au client)
+     * Émise (reçue du fournisseur)
      */
     ISSUED,
-
-    /**
-     * En attente de paiement (alias pour ISSUED - rétrocompatibilité)
-     */
-    PENDING,
 
     /**
      * Payée (totalement réglée)

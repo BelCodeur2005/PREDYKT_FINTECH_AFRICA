@@ -58,4 +58,20 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
      * Vérifie si un fournisseur existe par nom
      */
     boolean existsByCompanyAndName(Company company, String name);
+
+    /**
+     * Rechercher des fournisseurs par nom (recherche partielle)
+     */
+    @Query("SELECT s FROM Supplier s WHERE s.company = :company AND LOWER(s.name) LIKE LOWER(CONCAT('%', :searchTerm, '%')) ORDER BY s.name ASC")
+    List<Supplier> searchByName(@Param("company") Company company, @Param("searchTerm") String searchTerm);
+
+    /**
+     * Trouver les fournisseurs triés par nom
+     */
+    List<Supplier> findByCompanyOrderByNameAsc(Company company);
+
+    /**
+     * Trouver les fournisseurs actifs triés par nom
+     */
+    List<Supplier> findByCompanyAndIsActiveTrueOrderByNameAsc(Company company);
 }

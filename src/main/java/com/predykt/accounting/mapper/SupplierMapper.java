@@ -17,8 +17,10 @@ public interface SupplierMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "company", ignore = true)
     @Mapping(target = "hasNiu", ignore = true)
+    @Mapping(target = "auxiliaryAccount", ignore = true)
     Supplier toEntity(SupplierCreateRequest request);
 
+    @Mapping(target = "auxiliaryAccountNumber", expression = "java(supplier.getAuxiliaryAccountNumber())")
     @Mapping(target = "applicableAirRate", expression = "java(supplier.getApplicableAirRate())")
     @Mapping(target = "requiresAlert", expression = "java(!supplier.hasValidNiu())")
     @Mapping(target = "alertMessage", expression = "java(supplier.hasValidNiu() ? null : \"⚠️ NIU manquant - Taux AIR majoré à 5,5%\")")
@@ -27,5 +29,6 @@ public interface SupplierMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "company", ignore = true)
     @Mapping(target = "hasNiu", ignore = true)
+    @Mapping(target = "auxiliaryAccount", ignore = true)
     void updateEntityFromRequest(SupplierUpdateRequest request, @MappingTarget Supplier supplier);
 }

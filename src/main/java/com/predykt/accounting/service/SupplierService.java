@@ -24,9 +24,10 @@ public class SupplierService {
 
     private final SupplierRepository supplierRepository;
     private final CompanyRepository companyRepository;
+    private final TiersAccountService tiersAccountService;
 
     /**
-     * Crée un nouveau fournisseur
+     * Crée un nouveau fournisseur avec génération automatique du sous-compte auxiliaire OHADA
      */
     @Transactional
     public Supplier createSupplier(Long companyId, Supplier supplier) {
@@ -40,11 +41,17 @@ public class SupplierService {
 
         supplier.setCompany(company);
 
+        // Générer automatiquement le sous-compte auxiliaire OHADA (4011001, 4011002...)
+        var auxiliaryAccount = tiersAccountService.createSupplierAuxiliaryAccount(company, supplier);
+        supplier.setAuxiliaryAccount(auxiliaryAccount);
+
         // Log si NIU manquant
         if (!supplier.hasValidNiu()) {
-            log.warn("⚠️ Fournisseur créé SANS NIU: {} - AIR sera à 5,5% (pénalité)", supplier.getName());
+            log.warn("⚠️ Fournisseur créé SANS NIU: {} - Compte: {} - AIR sera à 5,5% (pénalité)",
+                supplier.getName(), supplier.getAuxiliaryAccountNumber());
         } else {
-            log.info("✅ Fournisseur créé avec NIU: {} - AIR sera à 2,2%", supplier.getName());
+            log.info("✅ Fournisseur créé avec NIU: {} - Compte: {} - AIR sera à 2,2%",
+                supplier.getName(), supplier.getAuxiliaryAccountNumber());
         }
 
         return supplierRepository.save(supplier);

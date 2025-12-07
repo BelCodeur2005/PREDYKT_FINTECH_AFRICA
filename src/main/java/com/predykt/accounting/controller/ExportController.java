@@ -757,4 +757,164 @@ public class ExportController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
+    // ============================================================
+    // EXPORTS NOTES ANNEXES
+    // ============================================================
+
+    @GetMapping("/notes-annexes/pdf")
+    @Operation(summary = "Exporter les Notes Annexes en PDF",
+               description = "Génère et télécharge les 12 notes annexes OHADA au format PDF")
+    public ResponseEntity<byte[]> exportNotesAnnexesToPdf(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] pdfData = exportService.exportNotesAnnexesToPdf(companyId, fiscalYear);
+
+            String filename = String.format("notes-annexes_%s_%d.pdf", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/notes-annexes/excel")
+    @Operation(summary = "Exporter les Notes Annexes en Excel",
+               description = "Génère et télécharge les 12 notes annexes OHADA au format Excel")
+    public ResponseEntity<byte[]> exportNotesAnnexesToExcel(
+            @PathVariable Long companyId,
+            @RequestParam Integer fiscalYear) {
+
+        try {
+            byte[] excelData = exportService.exportNotesAnnexesToExcel(companyId, fiscalYear);
+
+            String filename = String.format("notes-annexes_%s_%d.xlsx", companyId, fiscalYear);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    // ============================================================
+    // EXPORTS GRANDS LIVRES AUXILIAIRES
+    // ============================================================
+
+    @GetMapping("/subledgers/customers/pdf")
+    @Operation(summary = "Exporter le Grand Livre Auxiliaire Clients en PDF",
+               description = "Génère et télécharge le grand livre auxiliaire clients au format PDF")
+    public ResponseEntity<byte[]> exportCustomersSubledgerToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportCustomersSubledgerToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("gl-auxiliaire-clients_%s_%s_%s.pdf",
+                companyId, startDate.format(FILE_DATE_FORMATTER), endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/subledgers/customers/excel")
+    @Operation(summary = "Exporter le Grand Livre Auxiliaire Clients en Excel",
+               description = "Génère et télécharge le grand livre auxiliaire clients au format Excel")
+    public ResponseEntity<byte[]> exportCustomersSubledgerToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportCustomersSubledgerToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("gl-auxiliaire-clients_%s_%s_%s.xlsx",
+                companyId, startDate.format(FILE_DATE_FORMATTER), endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/subledgers/suppliers/pdf")
+    @Operation(summary = "Exporter le Grand Livre Auxiliaire Fournisseurs en PDF",
+               description = "Génère et télécharge le grand livre auxiliaire fournisseurs au format PDF")
+    public ResponseEntity<byte[]> exportSuppliersSubledgerToPdf(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] pdfData = exportService.exportSuppliersSubledgerToPdf(companyId, startDate, endDate);
+
+            String filename = String.format("gl-auxiliaire-fournisseurs_%s_%s_%s.pdf",
+                companyId, startDate.format(FILE_DATE_FORMATTER), endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfData.length);
+
+            return new ResponseEntity<>(pdfData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/subledgers/suppliers/excel")
+    @Operation(summary = "Exporter le Grand Livre Auxiliaire Fournisseurs en Excel",
+               description = "Génère et télécharge le grand livre auxiliaire fournisseurs au format Excel")
+    public ResponseEntity<byte[]> exportSuppliersSubledgerToExcel(
+            @PathVariable Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        try {
+            byte[] excelData = exportService.exportSuppliersSubledgerToExcel(companyId, startDate, endDate);
+
+            String filename = String.format("gl-auxiliaire-fournisseurs_%s_%s_%s.xlsx",
+                companyId, startDate.format(FILE_DATE_FORMATTER), endDate.format(FILE_DATE_FORMATTER));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(excelData.length);
+            headers.set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+            return new ResponseEntity<>(excelData, headers, HttpStatus.OK);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
 }

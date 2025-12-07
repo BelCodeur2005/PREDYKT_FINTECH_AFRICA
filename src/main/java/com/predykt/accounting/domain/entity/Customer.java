@@ -6,21 +6,22 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
 /**
- * Entité représentant un fournisseur
- * Gère le NIU (Numéro d'Identifiant Unique) pour le calcul de l'AIR (précompte)
+ * Entité représentant un client
+ * Gère le NIU (Numéro d'Identifiant Unique) pour la déduction de TVA
+ * IMPORTANT: Cette entité est OPTIONNELLE - le système fonctionne sans elle
  */
 @Entity
-@Table(name = "suppliers", indexes = {
-    @Index(name = "idx_suppliers_company", columnList = "company_id"),
-    @Index(name = "idx_suppliers_niu", columnList = "niu_number"),
-    @Index(name = "idx_suppliers_active", columnList = "is_active")
+@Table(name = "customers", indexes = {
+    @Index(name = "idx_customers_company", columnList = "company_id"),
+    @Index(name = "idx_customers_niu", columnList = "niu_number"),
+    @Index(name = "idx_customers_active", columnList = "is_active")
 })
 @Data
 @EqualsAndHashCode(callSuper = true)
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Supplier extends BaseEntity {
+public class Customer extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,7 +31,7 @@ public class Supplier extends BaseEntity {
     @JoinColumn(name = "company_id", nullable = false)
     private Company company;
 
-    @NotBlank(message = "Le nom du fournisseur est obligatoire")
+    @NotBlank(message = "Le nom du client est obligatoire")
     @Column(nullable = false, length = 200)
     private String name;
 
@@ -39,9 +40,7 @@ public class Supplier extends BaseEntity {
 
     /**
      * NIU - Numéro d'Identifiant Unique
-     * CRUCIAL pour le calcul de l'AIR (précompte):
-     * - Si NIU présent: AIR = 2,2%
-     * - Si NIU absent: AIR = 5,5% (pénalité) + alerte
+     * Important pour la conformité TVA et les exports
      */
     @Column(name = "niu_number", length = 50)
     private String niuNumber;
@@ -72,48 +71,45 @@ public class Supplier extends BaseEntity {
     private Boolean isActive = true;
 
     /**
-     * Type de fournisseur:
-     * - GOODS: Fourniture de marchandises
-     * - SERVICES: Prestation de services
-     * - RENT: Loueur (soumis à IRPP Loyer 15%)
-     * - UTILITIES: Services publics (eau, électricité)
+     * Type de client:
+     * - RETAIL: Détail
+     * - WHOLESALE: Grossiste
+     * - EXPORT: Export international
+     * - GOVERNMENT: Administrations publiques
      */
-    @Column(name = "supplier_type", length = 50)
-    private String supplierType;
+    @Column(name = "customer_type", length = 50)
+    private String customerType;
 
     @Column(name = "payment_terms")
     @Builder.Default
     private Integer paymentTerms = 30;  // Jours de délai de paiement
 
     /**
-     * Vérifie si le fournisseur est un loueur (soumis à IRPP Loyer 15%)
+     * Limite de crédit autorisée
      */
-    public boolean isRentSupplier() {
-        return "RENT".equalsIgnoreCase(supplierType);
+    @Column(name = "credit_limit", precision = 15, scale = 2)
+    private java.math.BigDecimal creditLimit;
+
+    /**
+     * Vérifie si le client est un client export (peut bénéficier d'exonération TVA)
+     */
+    public boolean isExportCustomer() {
+        return "EXPORT".equalsIgnoreCase(customerType);
     }
 
     /**
-     * Vérifie si le fournisseur a un NIU valide
-     */
-    public boolean hasValidNiu() {
-        return hasNiu && niuNumber != null && !niuNumber.trim().isEmpty();
-    }
-
-    /**
-     * Sous-compte auxiliaire OHADA (4011001, 4011002...)
-     * Auto-généré lors de la création du fournisseur
+     * Sous-compte auxiliaire OHADA (4111001, 4111002...)
+     * Auto-généré lors de la création du client
      */
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "auxiliary_account_id")
     private ChartOfAccounts auxiliaryAccount;
 
     /**
-     * Retourne le taux AIR applicable selon le NIU
+     * Vérifie si le client a un NIU valide
      */
-    public java.math.BigDecimal getApplicableAirRate() {
-        return hasValidNiu()
-            ? new java.math.BigDecimal("2.2")
-            : new java.math.BigDecimal("5.5");
+    public boolean hasValidNiu() {
+        return hasNiu && niuNumber != null && !niuNumber.trim().isEmpty();
     }
 
     /**

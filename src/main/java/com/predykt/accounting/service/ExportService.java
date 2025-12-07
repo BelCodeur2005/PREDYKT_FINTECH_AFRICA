@@ -11,6 +11,8 @@ import com.itextpdf.layout.properties.UnitValue;
 import com.predykt.accounting.domain.entity.Company;
 import com.predykt.accounting.dto.response.BalanceSheetResponse;
 import com.predykt.accounting.dto.response.IncomeStatementResponse;
+import com.predykt.accounting.dto.response.NotesAnnexesResponse;
+import com.predykt.accounting.dto.response.SubledgerResponse;
 import com.predykt.accounting.repository.CompanyRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +45,8 @@ public class ExportService {
     private final DashboardService dashboardService;
     private final TAFIREService tafireService;
     private final AuxiliaryJournalsService auxiliaryJournalsService;
+    private final NotesAnnexesService notesAnnexesService;
+    private final SubledgerService subledgerService;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
@@ -2124,5 +2128,554 @@ public class ExportService {
 
             return baos.toByteArray();
         }
+    }
+
+    // ============================================================
+    // EXPORTS NOTES ANNEXES
+    // ============================================================
+
+    /**
+     * Exporte les Notes Annexes en PDF
+     */
+    public byte[] exportNotesAnnexesToPdf(Long companyId, Integer fiscalYear) throws IOException {
+        log.info("Export des Notes Annexes en PDF pour l'entreprise {} - exercice {}", companyId, fiscalYear);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        NotesAnnexesResponse notes = notesAnnexesService.generateNotesAnnexes(companyId, fiscalYear);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête principal
+        document.add(new Paragraph("NOTES ANNEXES AUX ÉTATS FINANCIERS")
+            .setFontSize(18)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(notes.getCompanyName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph("Exercice clos le 31/12/" + fiscalYear)
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // NOTE 1: Principes et méthodes comptables
+        addNoteSectionHeader(document, "NOTE 1", "PRINCIPES ET MÉTHODES COMPTABLES");
+        document.add(new Paragraph("Référentiel comptable: " + notes.getNote1().getReferentielComptable())
+            .setFontSize(10).setMarginLeft(20));
+        document.add(new Paragraph("Méthodes d'évaluation: " + notes.getNote1().getMethodesEvaluation())
+            .setFontSize(10).setMarginLeft(20));
+        document.add(new Paragraph("Méthodes d'amortissement: " + notes.getNote1().getMethodesAmortissement())
+            .setFontSize(10).setMarginLeft(20));
+        document.add(new Paragraph("Méthodes de valorisation des stocks: " + notes.getNote1().getMethodesStocks())
+            .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+
+        // NOTE 2: Immobilisations
+        addNoteSectionHeader(document, "NOTE 2", "IMMOBILISATIONS CORPORELLES ET INCORPORELLES");
+        if (notes.getNote2() != null) {
+            if (notes.getNote2().getImmobilisationsCorporelles() != null) {
+                var corp = notes.getNote2().getImmobilisationsCorporelles();
+                document.add(new Paragraph("Immobilisations corporelles - " + corp.getCategorie())
+                    .setFontSize(10).setMarginLeft(20));
+                document.add(new Paragraph("Valeur nette: " + formatAmount(corp.getValeurNetteFin()))
+                    .setFontSize(9).setMarginLeft(30));
+            }
+            if (notes.getNote2().getCommentaire() != null) {
+                document.add(new Paragraph(notes.getNote2().getCommentaire())
+                    .setFontSize(9).setMarginLeft(20).setMarginBottom(10));
+            }
+        }
+
+        // NOTE 3: Immobilisations financières
+        addNoteSectionHeader(document, "NOTE 3", "IMMOBILISATIONS FINANCIÈRES");
+        if (notes.getNote3() != null) {
+            document.add(new Paragraph("Total immobilisations financières: " + formatAmount(notes.getNote3().getTotal()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 4: Stocks
+        addNoteSectionHeader(document, "NOTE 4", "STOCKS");
+        if (notes.getNote4() != null) {
+            document.add(new Paragraph("Méthode d'évaluation: " + notes.getNote4().getMethodeEvaluation())
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Total stocks (début): " + formatAmount(notes.getNote4().getTotalStocksDebut()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Total stocks (fin): " + formatAmount(notes.getNote4().getTotalStocksFin()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Variation: " + formatAmount(notes.getNote4().getVariationStocks()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 5: Créances et dettes
+        addNoteSectionHeader(document, "NOTE 5", "CRÉANCES ET DETTES");
+        if (notes.getNote5() != null) {
+            if (notes.getNote5().getCreances() != null) {
+                document.add(new Paragraph("Créances clients: " + formatAmount(notes.getNote5().getCreances().getCreancesClients()))
+                    .setFontSize(10).setMarginLeft(20));
+                document.add(new Paragraph("Total créances: " + formatAmount(notes.getNote5().getCreances().getTotal()))
+                    .setFontSize(10).setMarginLeft(20));
+            }
+            if (notes.getNote5().getDettes() != null) {
+                document.add(new Paragraph("Dettes fournisseurs: " + formatAmount(notes.getNote5().getDettes().getDettesFournisseurs()))
+                    .setFontSize(10).setMarginLeft(20));
+                document.add(new Paragraph("Total dettes: " + formatAmount(notes.getNote5().getDettes().getTotal()))
+                    .setFontSize(10).setMarginLeft(20));
+            }
+            document.add(new Paragraph("Provisions créances douteuses: " + formatAmount(notes.getNote5().getProvisionsCreancesDouteuses()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 6: Capitaux propres
+        addNoteSectionHeader(document, "NOTE 6", "CAPITAUX PROPRES");
+        if (notes.getNote6() != null) {
+            document.add(new Paragraph("Capital début exercice: " + formatAmount(notes.getNote6().getCapitalDebut()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Capital fin exercice: " + formatAmount(notes.getNote6().getCapitalFin()))
+                .setFontSize(10).setMarginLeft(20));
+            if (notes.getNote6().getTableauVariation() != null) {
+                var variation = notes.getNote6().getTableauVariation();
+                document.add(new Paragraph("Capital social: " + formatAmount(variation.getCapitalSocial()))
+                    .setFontSize(9).setMarginLeft(30));
+                document.add(new Paragraph("Résultat exercice: " + formatAmount(variation.getResultatExercice()))
+                    .setFontSize(9).setMarginLeft(30));
+            }
+            document.add(new Paragraph("").setMarginBottom(10));
+        }
+
+        // NOTE 7: Emprunts et dettes financières
+        addNoteSectionHeader(document, "NOTE 7", "EMPRUNTS ET DETTES FINANCIÈRES");
+        if (notes.getNote7() != null) {
+            document.add(new Paragraph("Total emprunts LT: " + formatAmount(notes.getNote7().getTotalEmpruntsLongTerme()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Total emprunts CT: " + formatAmount(notes.getNote7().getTotalEmpruntsCourtTerme()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 8: Autres passifs
+        addNoteSectionHeader(document, "NOTE 8", "AUTRES PASSIFS");
+        if (notes.getNote8() != null) {
+            document.add(new Paragraph("Provisions risques: " + formatAmount(notes.getNote8().getProvisionsRisques()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Provisions charges: " + formatAmount(notes.getNote8().getProvisionsCharges()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Produits constatés d'avance: " + formatAmount(notes.getNote8().getProduitsConstatesAvance()))
+                .setFontSize(10).setMarginLeft(20));
+            document.add(new Paragraph("Total: " + formatAmount(notes.getNote8().getTotal()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 9: Produits et charges
+        addNoteSectionHeader(document, "NOTE 9", "PRODUITS ET CHARGES");
+        if (notes.getNote9() != null) {
+            if (notes.getNote9().getProduits() != null) {
+                document.add(new Paragraph("Total produits: " + formatAmount(notes.getNote9().getProduits().getTotal()))
+                    .setFontSize(10).setMarginLeft(20));
+            }
+            if (notes.getNote9().getCharges() != null) {
+                document.add(new Paragraph("Total charges: " + formatAmount(notes.getNote9().getCharges().getTotal()))
+                    .setFontSize(10).setMarginLeft(20));
+                document.add(new Paragraph("Charges personnel: " + formatAmount(notes.getNote9().getCharges().getChargesPersonnel()))
+                    .setFontSize(9).setMarginLeft(30));
+            }
+            document.add(new Paragraph("").setMarginBottom(10));
+        }
+
+        // NOTE 10: Impôts et taxes
+        addNoteSectionHeader(document, "NOTE 10", "IMPÔTS ET TAXES");
+        if (notes.getNote10() != null) {
+            if (notes.getNote10().getImposSurBenefices() != null) {
+                document.add(new Paragraph("Impôt dû: " + formatAmount(notes.getNote10().getImposSurBenefices().getImpotDu()))
+                    .setFontSize(10).setMarginLeft(20));
+            }
+            if (notes.getNote10().getTva() != null) {
+                document.add(new Paragraph("TVA collectée: " + formatAmount(notes.getNote10().getTva().getTvaCollectee()))
+                    .setFontSize(10).setMarginLeft(20));
+                document.add(new Paragraph("TVA déductible: " + formatAmount(notes.getNote10().getTva().getTvaDeductible()))
+                    .setFontSize(10).setMarginLeft(20));
+            }
+            document.add(new Paragraph("Total impôts et taxes: " + formatAmount(notes.getNote10().getTotalImpotsEtTaxes()))
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 11: Engagements hors bilan
+        addNoteSectionHeader(document, "NOTE 11", "ENGAGEMENTS HORS BILAN");
+        if (notes.getNote11() != null) {
+            String commentaire = notes.getNote11().getCommentaire() != null ?
+                notes.getNote11().getCommentaire() : "Aucun engagement significatif hors bilan.";
+            document.add(new Paragraph(commentaire)
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        // NOTE 12: Événements postérieurs
+        addNoteSectionHeader(document, "NOTE 12", "ÉVÉNEMENTS POSTÉRIEURS À LA CLÔTURE");
+        if (notes.getNote12() != null) {
+            String commentaire = notes.getNote12().getCommentaireGeneral() != null ?
+                notes.getNote12().getCommentaireGeneral() : "Aucun événement significatif postérieur à la clôture.";
+            document.add(new Paragraph(commentaire)
+                .setFontSize(10).setMarginLeft(20).setMarginBottom(10));
+        }
+
+        document.close();
+
+        log.info("Export PDF des Notes Annexes terminé - {} octets", baos.size());
+        return baos.toByteArray();
+    }
+
+    /**
+     * Exporte les Notes Annexes en Excel
+     */
+    public byte[] exportNotesAnnexesToExcel(Long companyId, Integer fiscalYear) throws IOException {
+        log.info("Export des Notes Annexes en Excel pour l'entreprise {} - exercice {}", companyId, fiscalYear);
+
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        NotesAnnexesResponse notes = notesAnnexesService.generateNotesAnnexes(companyId, fiscalYear);
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            // Styles
+            CellStyle headerStyle = createHeaderStyle(workbook);
+            CellStyle totalStyle = createTotalStyle(workbook);
+            CellStyle currencyStyle = createCurrencyStyle(workbook);
+
+            // Feuille 1: Résumé
+            Sheet summarySheet = workbook.createSheet("Résumé");
+            int rowNum = 0;
+
+            // En-tête
+            Row titleRow = summarySheet.createRow(rowNum++);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("NOTES ANNEXES AUX ÉTATS FINANCIERS - Exercice " + fiscalYear);
+            titleCell.setCellStyle(headerStyle);
+
+            rowNum++;
+            Row companyRow = summarySheet.createRow(rowNum++);
+            companyRow.createCell(0).setCellValue("Entreprise:");
+            companyRow.createCell(1).setCellValue(notes.getCompanyName());
+
+            rowNum++;
+
+            // Tableau des 12 notes
+            Row headerRow = summarySheet.createRow(rowNum++);
+            headerRow.createCell(0).setCellValue("Note");
+            headerRow.createCell(1).setCellValue("Titre");
+            headerRow.getCell(0).setCellStyle(headerStyle);
+            headerRow.getCell(1).setCellStyle(headerStyle);
+
+            String[] noteTitles = {
+                "Principes et méthodes comptables",
+                "Immobilisations corporelles et incorporelles",
+                "Immobilisations financières",
+                "Stocks",
+                "Créances et dettes",
+                "Capitaux propres",
+                "Emprunts et dettes financières",
+                "Autres passifs",
+                "Produits et charges",
+                "Impôts et taxes",
+                "Engagements hors bilan",
+                "Événements postérieurs à la clôture"
+            };
+
+            for (int i = 0; i < noteTitles.length; i++) {
+                Row noteRow = summarySheet.createRow(rowNum++);
+                noteRow.createCell(0).setCellValue("Note " + (i + 1));
+                noteRow.createCell(1).setCellValue(noteTitles[i]);
+            }
+
+            // Feuille 2: Détails (simplifiée pour Notes Annexes complexes)
+            Sheet detailSheet = workbook.createSheet("Détails");
+            int detailRow = 0;
+
+            Row detailTitle = detailSheet.createRow(detailRow++);
+            detailTitle.createCell(0).setCellValue("DÉTAILS SÉLECTIONNÉS DES NOTES ANNEXES");
+            detailTitle.getCell(0).setCellStyle(headerStyle);
+
+            detailRow++;
+
+            // Note 4: Stocks
+            if (notes.getNote4() != null) {
+                Row stockLabel = detailSheet.createRow(detailRow++);
+                stockLabel.createCell(0).setCellValue("STOCKS:");
+                stockLabel.getCell(0).setCellStyle(headerStyle);
+
+                Row stockRow = detailSheet.createRow(detailRow++);
+                stockRow.createCell(0).setCellValue("Méthode évaluation:");
+                stockRow.createCell(1).setCellValue(notes.getNote4().getMethodeEvaluation());
+
+                Row stockTotalRow = detailSheet.createRow(detailRow++);
+                stockTotalRow.createCell(0).setCellValue("Total stocks (fin):");
+                Cell stockCell = stockTotalRow.createCell(1);
+                stockCell.setCellValue(notes.getNote4().getTotalStocksFin() != null ?
+                    notes.getNote4().getTotalStocksFin().doubleValue() : 0);
+                stockCell.setCellStyle(currencyStyle);
+
+                detailRow++;
+            }
+
+            // Note 10: Impôts
+            if (notes.getNote10() != null) {
+                Row impotLabel = detailSheet.createRow(detailRow++);
+                impotLabel.createCell(0).setCellValue("IMPÔTS ET TAXES:");
+                impotLabel.getCell(0).setCellStyle(headerStyle);
+
+                Row impotRow = detailSheet.createRow(detailRow++);
+                impotRow.createCell(0).setCellValue("Total impôts et taxes:");
+                Cell impotCell = impotRow.createCell(1);
+                impotCell.setCellValue(notes.getNote10().getTotalImpotsEtTaxes() != null ?
+                    notes.getNote10().getTotalImpotsEtTaxes().doubleValue() : 0);
+                impotCell.setCellStyle(currencyStyle);
+            }
+
+            detailSheet.autoSizeColumn(0);
+            detailSheet.autoSizeColumn(1);
+
+            // Auto-size colonnes feuille résumé
+            for (int i = 0; i < 2; i++) {
+                summarySheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            workbook.write(baos);
+
+            log.info("Export Excel des Notes Annexes terminé - {} octets", baos.size());
+            return baos.toByteArray();
+        }
+    }
+
+    // ============================================================
+    // EXPORTS GRANDS LIVRES AUXILIAIRES
+    // ============================================================
+
+    /**
+     * Exporte le Grand Livre Auxiliaire CLIENTS en PDF
+     */
+    public byte[] exportCustomersSubledgerToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du GL Auxiliaire Clients en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        return exportSubledgerToPdf(companyId, startDate, endDate, "CLIENTS");
+    }
+
+    /**
+     * Exporte le Grand Livre Auxiliaire FOURNISSEURS en PDF
+     */
+    public byte[] exportSuppliersSubledgerToPdf(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du GL Auxiliaire Fournisseurs en PDF pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        return exportSubledgerToPdf(companyId, startDate, endDate, "FOURNISSEURS");
+    }
+
+    /**
+     * Méthode générique pour exporter un grand livre auxiliaire en PDF
+     */
+    private byte[] exportSubledgerToPdf(Long companyId, LocalDate startDate, LocalDate endDate, String type) throws IOException {
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        SubledgerResponse subledger = type.equals("CLIENTS") ?
+            subledgerService.getCustomersSubledger(companyId, startDate, endDate) :
+            subledgerService.getSuppliersSubledger(companyId, startDate, endDate);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfWriter writer = new PdfWriter(baos);
+        PdfDocument pdf = new PdfDocument(writer);
+        Document document = new Document(pdf);
+
+        // En-tête
+        document.add(new Paragraph("GRAND LIVRE AUXILIAIRE " + type)
+            .setFontSize(18)
+            .setBold()
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph(company.getName())
+            .setFontSize(14)
+            .setTextAlignment(TextAlignment.CENTER));
+
+        document.add(new Paragraph("Période: " + startDate.format(DATE_FORMATTER) + " au " + endDate.format(DATE_FORMATTER))
+            .setFontSize(12)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setMarginBottom(20));
+
+        // Statistiques globales
+        document.add(new Paragraph("STATISTIQUES GLOBALES")
+            .setFontSize(12)
+            .setBold()
+            .setMarginBottom(5));
+
+        document.add(new Paragraph("Nombre de tiers: " + (subledger.getNombreTiers() != null ? subledger.getNombreTiers() : 0))
+            .setFontSize(10).setMarginLeft(20));
+        document.add(new Paragraph("Solde total: " + formatAmount(subledger.getTotalSoldeCloture()))
+            .setFontSize(10).setMarginLeft(20));
+        document.add(new Paragraph("Nombre d'écritures: " + (subledger.getNombreEcritures() != null ? subledger.getNombreEcritures() : 0))
+            .setFontSize(10).setMarginLeft(20).setMarginBottom(15));
+
+        // Détail par tiers (limité aux 20 premiers pour le PDF)
+        document.add(new Paragraph("DÉTAIL PAR TIERS (Top 20)")
+            .setFontSize(12)
+            .setBold()
+            .setMarginBottom(5));
+
+        if (subledger.getTiersDetails() != null && !subledger.getTiersDetails().isEmpty()) {
+            int count = 0;
+            for (SubledgerResponse.TiersDetail tiers : subledger.getTiersDetails()) {
+                if (count++ >= 20) break;
+
+                document.add(new Paragraph(tiers.getTiersName() + " (" + tiers.getAccountNumber() + ")")
+                    .setFontSize(11)
+                    .setBold()
+                    .setMarginTop(10));
+
+                document.add(new Paragraph("Solde: " + formatAmount(tiers.getSoldeCloture()) +
+                    " | Écritures: " + tiers.getNombreEcritures())
+                    .setFontSize(9)
+                    .setMarginLeft(20)
+                    .setMarginBottom(5));
+            }
+        }
+
+        document.close();
+
+        log.info("Export PDF du GL Auxiliaire {} terminé - {} octets", type, baos.size());
+        return baos.toByteArray();
+    }
+
+    /**
+     * Exporte le Grand Livre Auxiliaire CLIENTS en Excel
+     */
+    public byte[] exportCustomersSubledgerToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du GL Auxiliaire Clients en Excel pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        return exportSubledgerToExcel(companyId, startDate, endDate, "CLIENTS");
+    }
+
+    /**
+     * Exporte le Grand Livre Auxiliaire FOURNISSEURS en Excel
+     */
+    public byte[] exportSuppliersSubledgerToExcel(Long companyId, LocalDate startDate, LocalDate endDate) throws IOException {
+        log.info("Export du GL Auxiliaire Fournisseurs en Excel pour l'entreprise {} du {} au {}",
+            companyId, startDate, endDate);
+
+        return exportSubledgerToExcel(companyId, startDate, endDate, "FOURNISSEURS");
+    }
+
+    /**
+     * Méthode générique pour exporter un grand livre auxiliaire en Excel
+     */
+    private byte[] exportSubledgerToExcel(Long companyId, LocalDate startDate, LocalDate endDate, String type) throws IOException {
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Entreprise non trouvée avec l'ID: " + companyId));
+
+        SubledgerResponse subledger = type.equals("CLIENTS") ?
+            subledgerService.getCustomersSubledger(companyId, startDate, endDate) :
+            subledgerService.getSuppliersSubledger(companyId, startDate, endDate);
+
+        try (Workbook workbook = new XSSFWorkbook()) {
+            CellStyle headerStyle = createHeaderStyle(workbook);
+            CellStyle totalStyle = createTotalStyle(workbook);
+            CellStyle currencyStyle = createCurrencyStyle(workbook);
+
+            // Feuille 1: Résumé
+            Sheet summarySheet = workbook.createSheet("Résumé");
+            int rowNum = 0;
+
+            // En-tête
+            Row titleRow = summarySheet.createRow(rowNum++);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("GRAND LIVRE AUXILIAIRE " + type);
+            titleCell.setCellStyle(headerStyle);
+
+            rowNum++;
+            Row companyRow = summarySheet.createRow(rowNum++);
+            companyRow.createCell(0).setCellValue("Entreprise:");
+            companyRow.createCell(1).setCellValue(company.getName());
+
+            Row periodRow = summarySheet.createRow(rowNum++);
+            periodRow.createCell(0).setCellValue("Période:");
+            periodRow.createCell(1).setCellValue(startDate.format(DATE_FORMATTER) + " au " + endDate.format(DATE_FORMATTER));
+
+            rowNum++;
+
+            // Statistiques
+            Row statRow1 = summarySheet.createRow(rowNum++);
+            statRow1.createCell(0).setCellValue("Nombre de tiers:");
+            statRow1.createCell(1).setCellValue(subledger.getNombreTiers() != null ? subledger.getNombreTiers() : 0);
+
+            Row statRow2 = summarySheet.createRow(rowNum++);
+            statRow2.createCell(0).setCellValue("Solde total:");
+            Cell soldeCell = statRow2.createCell(1);
+            soldeCell.setCellValue(subledger.getTotalSoldeCloture() != null ?
+                subledger.getTotalSoldeCloture().doubleValue() : 0);
+            soldeCell.setCellStyle(currencyStyle);
+
+            Row statRow3 = summarySheet.createRow(rowNum++);
+            statRow3.createCell(0).setCellValue("Nombre d'écritures:");
+            statRow3.createCell(1).setCellValue(subledger.getNombreEcritures() != null ? subledger.getNombreEcritures() : 0);
+
+            rowNum += 2;
+
+            // Tableau des tiers
+            Row headerRow = summarySheet.createRow(rowNum++);
+            String[] headers = {"Compte", "Nom", "Solde", "Nb écritures", "Catégorie risque"};
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            if (subledger.getTiersDetails() != null) {
+                for (SubledgerResponse.TiersDetail tiers : subledger.getTiersDetails()) {
+                    Row dataRow = summarySheet.createRow(rowNum++);
+                    dataRow.createCell(0).setCellValue(tiers.getAccountNumber());
+                    dataRow.createCell(1).setCellValue(tiers.getTiersName());
+
+                    Cell soldeCellRow = dataRow.createCell(2);
+                    soldeCellRow.setCellValue(tiers.getSoldeCloture() != null ? tiers.getSoldeCloture().doubleValue() : 0);
+                    soldeCellRow.setCellStyle(currencyStyle);
+
+                    dataRow.createCell(3).setCellValue(tiers.getNombreEcritures() != null ? tiers.getNombreEcritures() : 0);
+
+                    if (tiers.getAnalyse() != null) {
+                        dataRow.createCell(4).setCellValue(tiers.getAnalyse().getCategorieRisque() != null ?
+                            tiers.getAnalyse().getCategorieRisque() : "");
+                    }
+                }
+            }
+
+            // Auto-size colonnes
+            for (int i = 0; i < headers.length; i++) {
+                summarySheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            workbook.write(baos);
+
+            log.info("Export Excel du GL Auxiliaire {} terminé - {} octets", type, baos.size());
+            return baos.toByteArray();
+        }
+    }
+
+    // ============================================================
+    // MÉTHODES UTILITAIRES POUR NOTES ANNEXES
+    // ============================================================
+
+    /**
+     * Ajoute un en-tête de section pour les notes annexes en PDF
+     */
+    private void addNoteSectionHeader(Document document, String noteNumber, String noteTitle) {
+        document.add(new Paragraph(noteNumber + " - " + noteTitle)
+            .setFontSize(12)
+            .setBold()
+            .setMarginTop(15)
+            .setBackgroundColor(ColorConstants.LIGHT_GRAY)
+            .setPadding(5));
     }
 }
