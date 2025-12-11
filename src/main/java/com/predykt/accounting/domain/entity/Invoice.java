@@ -168,6 +168,10 @@ public class Invoice extends BaseEntity {
     @Builder.Default
     private List<Payment> payments = new ArrayList<>();
 
+    @OneToMany(mappedBy = "invoice")
+    @Builder.Default
+    private List<Deposit> deposits = new ArrayList<>();  // Acomptes imputés sur cette facture
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "general_ledger_id")
     private GeneralLedger generalLedger;  // Écriture comptable générée
@@ -272,6 +276,82 @@ public class Invoice extends BaseEntity {
      */
     public boolean isCancellable() {
         return this.status != InvoiceStatus.PAID && this.amountPaid.compareTo(BigDecimal.ZERO) == 0;
+    }
+
+    /**
+     * Calcule le pourcentage de la facture qui a été payé
+     */
+    public BigDecimal getPaymentPercentage() {
+        if (this.totalTtc.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+        return this.amountPaid
+            .divide(this.totalTtc, 2, java.math.RoundingMode.HALF_UP)
+            .multiply(new BigDecimal("100"));
+    }
+
+    /**
+     * Retourne le nombre de paiements enregistrés pour cette facture
+     */
+    public int getPaymentCount() {
+        return this.payments != null ? this.payments.size() : 0;
+    }
+
+    /**
+     * Vérifie si la facture a des paiements fractionnés (plus d'un paiement)
+     */
+    public boolean hasFractionalPayments() {
+        return getPaymentCount() > 1;
+    }
+
+    /**
+     * Retourne le nombre d'acomptes imputés sur cette facture
+     */
+    public int getDepositCount() {
+        return this.deposits != null ? this.deposits.size() : 0;
+    }
+
+    /**
+     * Calcule le montant total des acomptes imputés sur cette facture
+     */
+    public BigDecimal getTotalDepositsApplied() {
+        if (this.deposits == null || this.deposits.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        return this.deposits.stream()
+            .filter(Deposit::getIsApplied)
+            .map(Deposit::getAmountTtc)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * Vérifie si la facture a des acomptes imputés
+     */
+    public boolean hasDepositsApplied() {
+        return getDepositCount() > 0 && getTotalDepositsApplied().compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    /**
+     * Marque la facture comme payée
+     */
+    public void markAsPaid() {
+        this.status = InvoiceStatus.PAID;
+        this.paymentDate = LocalDate.now();
+    }
+
+    /**
+     * Marque la facture comme partiellement payée
+     */
+    public void markAsPartiallyPaid() {
+        this.status = InvoiceStatus.PARTIAL_PAID;
+    }
+
+    /**
+     * Marque la facture comme impayée
+     */
+    public void markAsUnpaid() {
+        this.status = InvoiceStatus.UNPAID;
+        this.paymentDate = null;
     }
 
     /**

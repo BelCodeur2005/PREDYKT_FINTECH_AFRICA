@@ -44,18 +44,16 @@ public class BillService {
     private final BillLineRepository billLineRepository;
     private final SupplierRepository supplierRepository;
     private final CompanyRepository companyRepository;
+    private final ChartOfAccountsRepository chartOfAccountsRepository;
     private final GeneralLedgerRepository generalLedgerRepository;
+    private final TaxCalculationRepository taxCalculationRepository;
+    private final TaxService taxService;
     private final JdbcTemplate jdbcTemplate;
 
-    // Constantes OHADA + Fiscalité Cameroun
+    // Constantes OHADA
     private static final String BILL_PREFIX = "FA";
     private static final String VAT_DEDUCTIBLE_ACCOUNT = "4452";  // TVA déductible
-    private static final String AIR_ACCOUNT = "4421";  // AIR à récupérer
-    private static final String IRPP_RENT_ACCOUNT = "4422";  // IRPP Loyer retenu
     private static final String PURCHASE_ACCOUNT_DEFAULT = "601";  // Achats de marchandises
-    private static final BigDecimal AIR_RATE_WITH_NIU = new BigDecimal("2.2");
-    private static final BigDecimal AIR_RATE_WITHOUT_NIU = new BigDecimal("5.5");
-    private static final BigDecimal IRPP_RENT_RATE = new BigDecimal("15.0");
 
     /**
      * Créer une nouvelle facture fournisseur (statut DRAFT)
@@ -103,7 +101,7 @@ public class BillService {
         // 5. Ajouter les lignes de facture
         int lineNumber = 1;
         for (BillLineRequest lineReq : request.getLines()) {
-            BillLine line = createBillLine(lineReq, lineNumber++);
+            BillLine line = createBillLine(lineReq, lineNumber++, company);
             bill.addLine(line);
         }
 
@@ -196,7 +194,7 @@ public class BillService {
 
             int lineNumber = 1;
             for (BillLineRequest lineReq : request.getLines()) {
-                BillLine line = createBillLine(lineReq, lineNumber++);
+                BillLine line = createBillLine(lineReq, lineNumber++, bill.getCompany());
                 bill.addLine(line);
             }
 
@@ -283,6 +281,7 @@ public class BillService {
 
     /**
      * Calculer tous les montants de la facture + AIR + IRPP Loyer
+     * Utilise TaxService pour calculs conformes et configurables
      */
     private void calculateBillAmounts(Bill bill) {
         // 1. Calculer totaux HT et TVA à partir des lignes
@@ -297,31 +296,83 @@ public class BillService {
         bill.setTotalHt(totalHt);
         bill.setVatDeductible(vatDeductible);
 
-        // 2. Calculer AIR (Acompte sur Impôt sur le Revenu)
-        BigDecimal airRate = bill.getSupplierHasNiu() ? AIR_RATE_WITH_NIU : AIR_RATE_WITHOUT_NIU;
-        BigDecimal airAmount = totalHt.multiply(airRate)
-            .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        // 2. Calculer AIR et IRPP via TaxService (conforme + alertes automatiques)
+        try {
+            List<com.predykt.accounting.domain.entity.TaxCalculation> taxCalculations =
+                taxService.calculateAllTaxesForTransaction(
+                    bill.getCompany(),
+                    totalHt,
+                    "PURCHASE",
+                    bill.getSupplier(),
+                    bill.getLines().isEmpty() ? null : bill.getLines().get(0).getAccountNumber(),
+                    bill.getIssueDate()
+                );
 
-        bill.setAirRate(airRate);
-        bill.setAirAmount(airAmount);
+            // Associer les TaxCalculation à la Bill et sauvegarder (traçabilité)
+            taxCalculations.forEach(taxCalc -> {
+                taxCalc.setBill(bill);
+                taxCalculationRepository.save(taxCalc);
+                log.debug("💾 TaxCalculation sauvegardée: {} - {} XAF", taxCalc.getTaxType(), taxCalc.getTaxAmount());
+            });
 
-        // 3. Calculer IRPP Loyer 15% (si le fournisseur est un loueur)
-        BigDecimal irppRentAmount = BigDecimal.ZERO;
-        if (bill.getBillType() == BillType.RENT ||
-            (bill.getSupplier() != null && bill.getSupplier().isRentSupplier())) {
-            irppRentAmount = totalHt.multiply(IRPP_RENT_RATE)
-                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            // Extraire AIR (2.2% avec NIU ou 5.5% sans NIU)
+            taxCalculations.stream()
+                .filter(tax -> tax.getTaxType().name().startsWith("AIR"))
+                .findFirst()
+                .ifPresent(airCalc -> {
+                    bill.setAirAmount(airCalc.getTaxAmount());
+                    bill.setAirRate(airCalc.getTaxRate());
+
+                    // ✅ Alertes automatiques si fournisseur sans NIU
+                    if (airCalc.getHasAlert() != null && airCalc.getHasAlert()) {
+                        log.warn("⚠️ {}", airCalc.getAlertMessage());
+                    }
+                });
+
+            // Extraire IRPP Loyer (15% si loueur)
+            taxCalculations.stream()
+                .filter(tax -> tax.getTaxType() == com.predykt.accounting.domain.enums.TaxType.IRPP_RENT)
+                .findFirst()
+                .ifPresent(irppCalc -> {
+                    bill.setIrppRentAmount(irppCalc.getTaxAmount());
+                    log.info("📝 IRPP Loyer appliqué: {} XAF (15%)", irppCalc.getTaxAmount());
+                });
+
+            log.info("✅ {} TaxCalculation(s) créées et associées à la facture {}",
+                taxCalculations.size(), bill.getBillNumber());
+
+        } catch (Exception e) {
+            // Fallback sur calcul manuel en cas d'erreur
+            log.error("Erreur calcul taxes via TaxService, fallback sur calcul manuel", e);
+            calculateTaxesFallback(bill, totalHt);
         }
-        bill.setIrppRentAmount(irppRentAmount);
 
-        // 4. Calculer TTC
+        // 3. Calculer TTC
         BigDecimal totalTtc = totalHt.add(vatDeductible);
         bill.setTotalTtc(totalTtc);
 
-        // 5. Initialiser amount_due
+        // 4. Initialiser amount_due
         bill.setAmountDue(totalTtc.subtract(bill.getAmountPaid()));
+    }
 
-        // Log pour info
+    /**
+     * Calcul manuel des taxes en fallback (sécurité)
+     */
+    private void calculateTaxesFallback(Bill bill, BigDecimal totalHt) {
+        // AIR : 2.2% avec NIU, 5.5% sans NIU
+        BigDecimal airRate = bill.getSupplierHasNiu() ? new BigDecimal("2.2") : new BigDecimal("5.5");
+        BigDecimal airAmount = totalHt.multiply(airRate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        bill.setAirRate(airRate);
+        bill.setAirAmount(airAmount);
+
+        // IRPP Loyer : 15% si loueur
+        if (bill.getBillType() == com.predykt.accounting.domain.enums.BillType.RENT ||
+            (bill.getSupplier() != null && bill.getSupplier().isRentSupplier())) {
+            BigDecimal irppAmount = totalHt.multiply(new BigDecimal("15"))
+                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            bill.setIrppRentAmount(irppAmount);
+        }
+
         if (!bill.getSupplierHasNiu()) {
             log.warn("⚠️ Fournisseur {} SANS NIU → AIR majoré à 5.5% (au lieu de 2.2%)",
                 bill.getSupplier().getName());
@@ -346,18 +397,24 @@ public class BillService {
         Supplier supplier = bill.getSupplier();
 
         // Récupérer le compte auxiliaire du fournisseur
-        String supplierAccount = supplier.getAuxiliaryAccountNumber();
-        if (supplierAccount == null) {
+        String supplierAccountNumber = supplier.getAuxiliaryAccountNumber();
+        if (supplierAccountNumber == null) {
             throw new ValidationException("Le fournisseur n'a pas de compte auxiliaire");
         }
 
+        ChartOfAccounts supplierAccount = chartOfAccountsRepository.findByCompanyAndAccountNumber(company, supplierAccountNumber)
+            .orElseThrow(() -> new ValidationException("Compte fournisseur non trouvé: " + supplierAccountNumber));
+
         // Ligne 1: DÉBIT Achats (601) = HT
+        ChartOfAccounts purchaseAccount = chartOfAccountsRepository.findByCompanyAndAccountNumber(company, PURCHASE_ACCOUNT_DEFAULT)
+            .orElseThrow(() -> new ValidationException("Compte achats non trouvé: " + PURCHASE_ACCOUNT_DEFAULT));
+
         GeneralLedger purchaseEntry = GeneralLedger.builder()
             .company(company)
             .entryDate(bill.getIssueDate())
             .journalCode("AC")  // Journal des achats
-            .pieceNumber(bill.getBillNumber())
-            .accountNumber(PURCHASE_ACCOUNT_DEFAULT)
+            .reference(bill.getBillNumber())
+            .account(purchaseAccount)
             .description("Achat - " + supplier.getName() + " - " + bill.getDescription())
             .debitAmount(bill.getTotalHt())
             .creditAmount(BigDecimal.ZERO)
@@ -367,12 +424,15 @@ public class BillService {
 
         // Ligne 2: DÉBIT TVA déductible (4452)
         if (bill.getVatDeductible().compareTo(BigDecimal.ZERO) > 0) {
+            ChartOfAccounts vatAccount = chartOfAccountsRepository.findByCompanyAndAccountNumber(company, VAT_DEDUCTIBLE_ACCOUNT)
+                .orElseThrow(() -> new ValidationException("Compte TVA déductible non trouvé: " + VAT_DEDUCTIBLE_ACCOUNT));
+
             GeneralLedger vatEntry = GeneralLedger.builder()
                 .company(company)
                 .entryDate(bill.getIssueDate())
                 .journalCode("AC")
-                .pieceNumber(bill.getBillNumber())
-                .accountNumber(VAT_DEDUCTIBLE_ACCOUNT)
+                .reference(bill.getBillNumber())
+                .account(vatAccount)
                 .description("TVA déductible sur facture " + bill.getBillNumber())
                 .debitAmount(bill.getVatDeductible())
                 .creditAmount(BigDecimal.ZERO)
@@ -381,15 +441,21 @@ public class BillService {
             generalLedgerRepository.save(vatEntry);
         }
 
-        // Ligne 3: DÉBIT AIR à récupérer (4421)
+        // Ligne 3: DÉBIT AIR à récupérer - Récupération compte depuis TaxService
         if (bill.getAirAmount().compareTo(BigDecimal.ZERO) > 0) {
+            // Récupérer le compte AIR depuis la configuration fiscale
+            String airAccountNumber = getAIRAccountNumber(company, bill.getSupplierHasNiu());
+
+            ChartOfAccounts airAccount = chartOfAccountsRepository.findByCompanyAndAccountNumber(company, airAccountNumber)
+                .orElseThrow(() -> new ValidationException("Compte AIR non trouvé: " + airAccountNumber));
+
             GeneralLedger airEntry = GeneralLedger.builder()
                 .company(company)
                 .entryDate(bill.getIssueDate())
                 .journalCode("AC")
-                .pieceNumber(bill.getBillNumber())
-                .accountNumber(AIR_ACCOUNT)
-                .description("AIR " + bill.getAirRate() + "% - " + bill.getBillNumber())
+                .reference(bill.getBillNumber())
+                .account(airAccount)  // Depuis config
+                .description(String.format("AIR %.2f%% - %s", bill.getAirRate(), bill.getBillNumber()))
                 .debitAmount(bill.getAirAmount())
                 .creditAmount(BigDecimal.ZERO)
                 .supplier(supplier)
@@ -397,14 +463,20 @@ public class BillService {
             generalLedgerRepository.save(airEntry);
         }
 
-        // Ligne 4: DÉBIT IRPP Loyer (si applicable)
+        // Ligne 4: DÉBIT IRPP Loyer (si applicable) - Récupération compte depuis TaxService
         if (bill.getIrppRentAmount().compareTo(BigDecimal.ZERO) > 0) {
+            // Récupérer le compte IRPP depuis la configuration fiscale
+            String irppAccountNumber = getIRPPRentAccountNumber(company);
+
+            ChartOfAccounts irppAccount = chartOfAccountsRepository.findByCompanyAndAccountNumber(company, irppAccountNumber)
+                .orElseThrow(() -> new ValidationException("Compte IRPP Loyer non trouvé: " + irppAccountNumber));
+
             GeneralLedger irppEntry = GeneralLedger.builder()
                 .company(company)
                 .entryDate(bill.getIssueDate())
                 .journalCode("AC")
-                .pieceNumber(bill.getBillNumber())
-                .accountNumber(IRPP_RENT_ACCOUNT)
+                .reference(bill.getBillNumber())
+                .account(irppAccount)  // Depuis config
                 .description("IRPP Loyer 15% - " + bill.getBillNumber())
                 .debitAmount(bill.getIrppRentAmount())
                 .creditAmount(BigDecimal.ZERO)
@@ -418,8 +490,8 @@ public class BillService {
             .company(company)
             .entryDate(bill.getIssueDate())
             .journalCode("AC")
-            .pieceNumber(bill.getBillNumber())
-            .accountNumber(supplierAccount)
+            .reference(bill.getBillNumber())
+            .account(supplierAccount)
             .description("Dette fournisseur " + supplier.getName() + " - " + bill.getBillNumber())
             .debitAmount(BigDecimal.ZERO)
             .creditAmount(bill.getTotalTtc())
@@ -427,9 +499,8 @@ public class BillService {
             .build();
         generalLedgerRepository.save(supplierEntry);
 
-        log.info("✅ Écriture comptable générée: DÉBIT {} + {} + {} / CRÉDIT {} = {} XAF",
-            PURCHASE_ACCOUNT_DEFAULT, VAT_DEDUCTIBLE_ACCOUNT, AIR_ACCOUNT,
-            supplierAccount, bill.getTotalTtc());
+        log.info("✅ Écriture comptable générée: DÉBIT {} + TVA + AIR/IRPP / CRÉDIT {} = {} XAF",
+            PURCHASE_ACCOUNT_DEFAULT, supplierAccountNumber, bill.getTotalTtc());
 
         return savedEntry;
     }
@@ -437,7 +508,13 @@ public class BillService {
     /**
      * Créer une ligne de facture fournisseur
      */
-    private BillLine createBillLine(BillLineRequest request, int lineNumber) {
+    private BillLine createBillLine(BillLineRequest request, int lineNumber, Company company) {
+        // Récupérer le taux de TVA depuis la configuration fiscale si non fourni
+        BigDecimal vatRate = request.getVatRate();
+        if (vatRate == null) {
+            vatRate = getDefaultVATRate(company);
+        }
+
         BillLine line = BillLine.builder()
             .lineNumber(lineNumber)
             .productCode(request.getProductCode())
@@ -446,7 +523,7 @@ public class BillService {
             .unit(request.getUnit() != null ? request.getUnit() : "Unité")
             .unitPrice(request.getUnitPrice())
             .discountPercentage(request.getDiscountPercentage() != null ? request.getDiscountPercentage() : BigDecimal.ZERO)
-            .vatRate(request.getVatRate() != null ? request.getVatRate() : new BigDecimal("19.25"))
+            .vatRate(vatRate)
             .accountNumber(request.getAccountNumber())
             .build();
 
@@ -546,5 +623,43 @@ public class BillService {
     private Company findCompanyOrThrow(Long companyId) {
         return companyRepository.findById(companyId)
             .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée: " + companyId));
+    }
+
+    /**
+     * Récupère le numéro de compte AIR depuis la configuration fiscale
+     */
+    private String getAIRAccountNumber(Company company, boolean hasNiu) {
+        com.predykt.accounting.domain.enums.TaxType airType = hasNiu
+            ? com.predykt.accounting.domain.enums.TaxType.AIR_WITH_NIU
+            : com.predykt.accounting.domain.enums.TaxType.AIR_WITHOUT_NIU;
+
+        return taxService.getTaxConfigurations(company.getId()).stream()
+            .filter(config -> config.getTaxType() == airType)
+            .map(config -> config.getAccountNumber())
+            .findFirst()
+            .orElse("4421");  // Fallback sur compte OHADA standard (AIR à récupérer)
+    }
+
+    /**
+     * Récupère le numéro de compte IRPP Loyer depuis la configuration fiscale
+     */
+    private String getIRPPRentAccountNumber(Company company) {
+        return taxService.getTaxConfigurations(company.getId()).stream()
+            .filter(config -> config.getTaxType() == com.predykt.accounting.domain.enums.TaxType.IRPP_RENT)
+            .map(config -> config.getAccountNumber())
+            .findFirst()
+            .orElse("4422");  // Fallback sur compte OHADA standard (IRPP Loyer retenu)
+    }
+
+    /**
+     * Récupère le taux de TVA par défaut depuis la configuration fiscale
+     */
+    private BigDecimal getDefaultVATRate(Company company) {
+        return taxService.getTaxConfigurations(company.getId()).stream()
+            .filter(config -> config.getTaxType() == com.predykt.accounting.domain.enums.TaxType.VAT)
+            .filter(config -> config.getIsActive())
+            .map(config -> config.getTaxRate())
+            .findFirst()
+            .orElse(new BigDecimal("19.25"));  // Fallback sur taux Cameroun standard
     }
 }

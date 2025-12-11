@@ -5,6 +5,8 @@ import com.predykt.accounting.domain.enums.InvoiceStatus;
 import com.predykt.accounting.domain.enums.PaymentMethod;
 import com.predykt.accounting.domain.enums.PaymentStatus;
 import com.predykt.accounting.domain.enums.PaymentType;
+import com.predykt.accounting.dto.request.JournalEntryLineRequest;
+import com.predykt.accounting.dto.request.JournalEntryRequest;
 import com.predykt.accounting.dto.request.PaymentCreateRequest;
 import com.predykt.accounting.dto.response.PaymentResponse;
 import com.predykt.accounting.exception.ResourceNotFoundException;
@@ -45,6 +47,7 @@ public class PaymentService {
     private final SupplierRepository supplierRepository;
     private final CompanyRepository companyRepository;
     private final GeneralLedgerRepository generalLedgerRepository;
+    private final GeneralLedgerService generalLedgerService;
     private final JdbcTemplate jdbcTemplate;
 
     // Constantes
@@ -268,6 +271,11 @@ public class PaymentService {
      * Journal BQ (Banque):
      * DÉBIT  | 521 (Banque)           | 1 192 500 | Argent reçu
      * CRÉDIT | 4111001 (Client)       | 1 192 500 | Annulation créance
+     *
+     * ✅ UTILISE GeneralLedgerService.recordJournalEntry() pour:
+     * - Validation de la partie double (débit = crédit)
+     * - Vérification du verrouillage de période
+     * - Détection automatique TVA déductible
      */
     private GeneralLedger generateCustomerPaymentEntry(Payment payment, Invoice invoice) {
         log.info("🔄 Génération écriture comptable paiement client {}", payment.getPaymentNumber());
@@ -275,38 +283,40 @@ public class PaymentService {
         Company company = payment.getCompany();
         String customerAccount = invoice.getCustomer().getAuxiliaryAccountNumber();
 
-        // Ligne 1: DÉBIT Banque
-        GeneralLedger bankEntry = GeneralLedger.builder()
-            .company(company)
+        // Construire la requête d'écriture comptable avec 2 lignes (partie double)
+        List<JournalEntryLineRequest> lines = List.of(
+            // Ligne 1: DÉBIT Banque (argent reçu)
+            JournalEntryLineRequest.builder()
+                .accountNumber(BANK_ACCOUNT_DEFAULT)
+                .description("Encaissement " + invoice.getCustomer().getName() + " - " + invoice.getInvoiceNumber())
+                .debitAmount(payment.getAmount())
+                .creditAmount(BigDecimal.ZERO)
+                .build(),
+
+            // Ligne 2: CRÉDIT Client (annulation créance)
+            JournalEntryLineRequest.builder()
+                .accountNumber(customerAccount)
+                .description("Règlement facture " + invoice.getInvoiceNumber())
+                .debitAmount(BigDecimal.ZERO)
+                .creditAmount(payment.getAmount())
+                .build()
+        );
+
+        JournalEntryRequest request = JournalEntryRequest.builder()
             .entryDate(payment.getPaymentDate())
             .journalCode("BQ")  // Journal banque
-            .pieceNumber(payment.getPaymentNumber())
-            .accountNumber(BANK_ACCOUNT_DEFAULT)
-            .description("Encaissement " + invoice.getCustomer().getName() + " - " + invoice.getInvoiceNumber())
-            .debitAmount(payment.getAmount())
-            .creditAmount(BigDecimal.ZERO)
-            .customer(invoice.getCustomer())
+            .reference(payment.getPaymentNumber())
+            .lines(lines)
             .build();
-        GeneralLedger savedEntry = generalLedgerRepository.save(bankEntry);
 
-        // Ligne 2: CRÉDIT Client (annulation créance)
-        GeneralLedger customerEntry = GeneralLedger.builder()
-            .company(company)
-            .entryDate(payment.getPaymentDate())
-            .journalCode("BQ")
-            .pieceNumber(payment.getPaymentNumber())
-            .accountNumber(customerAccount)
-            .description("Règlement facture " + invoice.getInvoiceNumber())
-            .debitAmount(BigDecimal.ZERO)
-            .creditAmount(payment.getAmount())
-            .customer(invoice.getCustomer())
-            .build();
-        generalLedgerRepository.save(customerEntry);
+        // ✅ Utiliser GeneralLedgerService qui VALIDE la partie double
+        List<GeneralLedger> entries = generalLedgerService.recordJournalEntry(company.getId(), request);
 
-        log.info("✅ Écriture paiement client: DÉBIT {} / CRÉDIT {} = {} XAF",
+        log.info("✅ Écriture paiement client validée: DÉBIT {} / CRÉDIT {} = {} XAF",
             BANK_ACCOUNT_DEFAULT, customerAccount, payment.getAmount());
 
-        return savedEntry;
+        // Retourner la première ligne (Banque) comme écriture principale
+        return entries.get(0);
     }
 
     /**
@@ -315,6 +325,11 @@ public class PaymentService {
      * Journal BQ:
      * DÉBIT  | 4011001 (Fournisseur)  | 585 250 | Annulation dette
      * CRÉDIT | 521 (Banque)           | 585 250 | Argent payé
+     *
+     * ✅ UTILISE GeneralLedgerService.recordJournalEntry() pour:
+     * - Validation de la partie double (débit = crédit)
+     * - Vérification du verrouillage de période
+     * - Détection automatique TVA déductible
      */
     private GeneralLedger generateSupplierPaymentEntry(Payment payment, Bill bill) {
         log.info("🔄 Génération écriture comptable paiement fournisseur {}", payment.getPaymentNumber());
@@ -322,38 +337,40 @@ public class PaymentService {
         Company company = payment.getCompany();
         String supplierAccount = bill.getSupplier().getAuxiliaryAccountNumber();
 
-        // Ligne 1: DÉBIT Fournisseur (annulation dette)
-        GeneralLedger supplierEntry = GeneralLedger.builder()
-            .company(company)
-            .entryDate(payment.getPaymentDate())
-            .journalCode("BQ")
-            .pieceNumber(payment.getPaymentNumber())
-            .accountNumber(supplierAccount)
-            .description("Paiement facture " + bill.getBillNumber())
-            .debitAmount(payment.getAmount())
-            .creditAmount(BigDecimal.ZERO)
-            .supplier(bill.getSupplier())
-            .build();
-        GeneralLedger savedEntry = generalLedgerRepository.save(supplierEntry);
+        // Construire la requête d'écriture comptable avec 2 lignes (partie double)
+        List<JournalEntryLineRequest> lines = List.of(
+            // Ligne 1: DÉBIT Fournisseur (annulation dette)
+            JournalEntryLineRequest.builder()
+                .accountNumber(supplierAccount)
+                .description("Paiement facture " + bill.getBillNumber())
+                .debitAmount(payment.getAmount())
+                .creditAmount(BigDecimal.ZERO)
+                .build(),
 
-        // Ligne 2: CRÉDIT Banque
-        GeneralLedger bankEntry = GeneralLedger.builder()
-            .company(company)
-            .entryDate(payment.getPaymentDate())
-            .journalCode("BQ")
-            .pieceNumber(payment.getPaymentNumber())
-            .accountNumber(BANK_ACCOUNT_DEFAULT)
-            .description("Décaissement " + bill.getSupplier().getName() + " - " + bill.getBillNumber())
-            .debitAmount(BigDecimal.ZERO)
-            .creditAmount(payment.getAmount())
-            .supplier(bill.getSupplier())
-            .build();
-        generalLedgerRepository.save(bankEntry);
+            // Ligne 2: CRÉDIT Banque (argent payé)
+            JournalEntryLineRequest.builder()
+                .accountNumber(BANK_ACCOUNT_DEFAULT)
+                .description("Décaissement " + bill.getSupplier().getName() + " - " + bill.getBillNumber())
+                .debitAmount(BigDecimal.ZERO)
+                .creditAmount(payment.getAmount())
+                .build()
+        );
 
-        log.info("✅ Écriture paiement fournisseur: DÉBIT {} / CRÉDIT {} = {} XAF",
+        JournalEntryRequest request = JournalEntryRequest.builder()
+            .entryDate(payment.getPaymentDate())
+            .journalCode("BQ")  // Journal banque
+            .reference(payment.getPaymentNumber())
+            .lines(lines)
+            .build();
+
+        // ✅ Utiliser GeneralLedgerService qui VALIDE la partie double
+        List<GeneralLedger> entries = generalLedgerService.recordJournalEntry(company.getId(), request);
+
+        log.info("✅ Écriture paiement fournisseur validée: DÉBIT {} / CRÉDIT {} = {} XAF",
             supplierAccount, BANK_ACCOUNT_DEFAULT, payment.getAmount());
 
-        return savedEntry;
+        // Retourner la première ligne (Fournisseur) comme écriture principale
+        return entries.get(0);
     }
 
     /**

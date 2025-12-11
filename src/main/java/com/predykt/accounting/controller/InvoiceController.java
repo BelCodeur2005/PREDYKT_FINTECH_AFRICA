@@ -4,6 +4,7 @@ import com.predykt.accounting.domain.enums.InvoiceStatus;
 import com.predykt.accounting.dto.request.InvoiceCreateRequest;
 import com.predykt.accounting.dto.request.InvoiceUpdateRequest;
 import com.predykt.accounting.dto.response.ApiResponse;
+import com.predykt.accounting.dto.response.InvoicePaymentSummaryResponse;
 import com.predykt.accounting.dto.response.InvoiceResponse;
 import com.predykt.accounting.service.InvoiceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -55,6 +56,37 @@ public class InvoiceController {
         InvoiceResponse response = invoiceService.getInvoice(companyId, invoiceId);
 
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/{invoiceId}/payments")
+    @Operation(summary = "Obtenir l'historique des paiements d'une facture (Option B - OHADA)",
+               description = "Récupère l'historique complet des paiements fractionnés d'une facture avec statistiques détaillées. " +
+                           "Conforme OHADA : Chaque paiement a été enregistré séparément à sa date effective, " +
+                           "créant une écriture comptable distincte (DÉBIT Banque / CRÉDIT Client). " +
+                           "\n\nExemple pratique :" +
+                           "\nFacture 200 000 XAF" +
+                           "\n• Paiement 1 : 15/03 - 100 000 XAF (50%)" +
+                           "\n• Paiement 2 : 30/03 - 100 000 XAF (50%)" +
+                           "\nTotal : 200 000 XAF (100%) - PAYÉE" +
+                           "\n\nLe résumé inclut :" +
+                           "\n- Liste de tous les paiements avec détails complets" +
+                           "\n- Statistiques : montant total payé, pourcentage, nombre de paiements" +
+                           "\n- Statut : en cours, partiellement payée, totalement payée" +
+                           "\n- Indicateurs de retard si applicable")
+    public ResponseEntity<ApiResponse<InvoicePaymentSummaryResponse>> getInvoicePayments(
+            @PathVariable Long companyId,
+            @PathVariable Long invoiceId) {
+
+        log.info("GET /api/v1/companies/{}/invoices/{}/payments - Récupération historique paiements", companyId, invoiceId);
+        InvoicePaymentSummaryResponse response = invoiceService.getInvoicePaymentSummary(companyId, invoiceId);
+
+        String message = String.format("%d paiement(s) enregistré(s) - %.2f%% payé (%s / %s XAF)",
+            response.getPaymentCount(),
+            response.getPaymentPercentage(),
+            response.getAmountPaid(),
+            response.getTotalTtc());
+
+        return ResponseEntity.ok(ApiResponse.success(response, message));
     }
 
     @GetMapping

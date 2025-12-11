@@ -30,6 +30,7 @@ public class VATDeclarationService {
     private final VATDeclarationRepository vatDeclarationRepository;
     private final GeneralLedgerRepository generalLedgerRepository;
     private final VATTransactionRepository vatTransactionRepository;
+    private final TaxCalculationRepository taxCalculationRepository;
 
     /**
      * Génère une déclaration de TVA mensuelle (CA3)
@@ -112,16 +113,31 @@ public class VATDeclarationService {
 
     /**
      * Calcule le solde d'un compte TVA pour une période
-     * NOUVELLE VERSION : Utilise VATTransactionRepository pour prendre en compte la récupérabilité
+     *
+     * ✅ VERSION PHASE 3 OPTIMISÉE (3 niveaux de priorité):
+     * 1. TaxCalculation (Phase 2) - Source de vérité principale
+     * 2. VATTransaction - Ancien système avec récupérabilité
+     * 3. GeneralLedger - Fallback ultime
      */
     private BigDecimal calculateVATByAccount(Company company, LocalDate startDate, LocalDate endDate, String accountNumber) {
-        // Si des transactions VAT existent, les utiliser (elles prennent en compte la récupérabilité)
+        // ========== PRIORITÉ 1: TaxCalculation (Phase 2) ==========
+        // Utiliser les calculs de taxes enregistrés lors de la création des factures/bills
+        BigDecimal fromTaxCalculations = calculateVATFromTaxCalculations(company, startDate, endDate, accountNumber);
+        if (fromTaxCalculations != null && fromTaxCalculations.compareTo(BigDecimal.ZERO) > 0) {
+            log.debug("📊 TVA depuis TaxCalculation (Phase 2): {} XAF pour compte {}", fromTaxCalculations, accountNumber);
+            return fromTaxCalculations;
+        }
+
+        // ========== PRIORITÉ 2: VATTransaction (ancien système) ==========
+        // Si pas de TaxCalculation, utiliser VATTransaction (avec récupérabilité)
         BigDecimal fromVatTransactions = calculateVATFromTransactions(company, startDate, endDate, accountNumber);
         if (fromVatTransactions != null && fromVatTransactions.compareTo(BigDecimal.ZERO) > 0) {
+            log.debug("📊 TVA depuis VATTransaction: {} XAF pour compte {}", fromVatTransactions, accountNumber);
             return fromVatTransactions;
         }
 
-        // Sinon, fallback sur l'ancien système (grand livre direct)
+        // ========== PRIORITÉ 3: GeneralLedger (fallback) ==========
+        log.debug("⚠️ Fallback sur GeneralLedger pour compte {}", accountNumber);
         List<GeneralLedger> entries = generalLedgerRepository
             .findByCompanyAndAccountNumberAndEntryDateBetween(company, accountNumber, startDate, endDate);
 
@@ -136,6 +152,34 @@ public class VATDeclarationService {
             } else if (accountNumber.startsWith("445")) {
                 // TVA déductible = débit
                 total = total.add(entry.getDebitAmount() != null ? entry.getDebitAmount() : BigDecimal.ZERO);
+            }
+        }
+
+        return total;
+    }
+
+    /**
+     * ✅ NOUVEAU (Phase 3): Calcule la TVA à partir de la table tax_calculations
+     * Source de vérité principale car enregistrée lors de la création des factures/bills
+     */
+    private BigDecimal calculateVATFromTaxCalculations(Company company, LocalDate startDate, LocalDate endDate, String accountNumber) {
+        // Récupérer toutes les TaxCalculations de type VAT pour la période
+        List<TaxCalculation> taxCalculations = taxCalculationRepository
+            .findByCompanyAndCalculationDateBetween(company, startDate, endDate);
+
+        BigDecimal total = BigDecimal.ZERO;
+
+        for (TaxCalculation taxCalc : taxCalculations) {
+            // Filtrer uniquement les calculs de TVA correspondant au compte
+            if (taxCalc.getTaxType() == com.predykt.accounting.domain.enums.TaxType.VAT &&
+                taxCalc.getAccountNumber() != null &&
+                taxCalc.getAccountNumber().equals(accountNumber)) {
+
+                total = total.add(taxCalc.getTaxAmount() != null ? taxCalc.getTaxAmount() : BigDecimal.ZERO);
+
+                log.trace("  → TaxCalculation #{}: {} XAF ({})",
+                    taxCalc.getId(), taxCalc.getTaxAmount(),
+                    taxCalc.getInvoice() != null ? "Invoice" : "Bill");
             }
         }
 

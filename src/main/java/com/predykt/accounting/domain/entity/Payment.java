@@ -134,6 +134,26 @@ public class Payment extends BaseEntity {
     @JoinColumn(name = "general_ledger_id")
     private GeneralLedger generalLedger;  // Écriture comptable générée
 
+    // ==================== Lien bancaire ====================
+
+    /**
+     * Transaction bancaire réelle associée (après rapprochement bancaire)
+     * Permet de tracer le paiement logique vers le mouvement bancaire effectif
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "bank_transaction_id")
+    private BankTransaction bankTransaction;
+
+    // ==================== Lien avec acompte ====================
+
+    /**
+     * Acompte associé à ce paiement (si ce paiement correspond à un acompte)
+     * Relation inverse de Deposit.payment
+     * Permet de tracer qu'un paiement est lié à un acompte reçu
+     */
+    @OneToOne(mappedBy = "payment", fetch = FetchType.LAZY)
+    private Deposit deposit;
+
     // ==================== Notes ====================
 
     @Column(columnDefinition = "TEXT")
@@ -156,6 +176,13 @@ public class Payment extends BaseEntity {
      */
     public boolean isSupplierPayment() {
         return this.paymentType == PaymentType.SUPPLIER_PAYMENT;
+    }
+
+    /**
+     * Vérifie si ce paiement est lié à un acompte
+     */
+    public boolean isLinkedToDeposit() {
+        return this.deposit != null;
     }
 
     /**

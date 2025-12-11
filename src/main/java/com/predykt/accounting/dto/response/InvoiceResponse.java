@@ -72,6 +72,11 @@ public class InvoiceResponse {
     private Boolean isOverdue;
     private String agingCategory;
 
+    // Statistiques de paiements (Option B - OHADA)
+    private BigDecimal paymentPercentage;  // Pourcentage payé (0-100)
+    private Integer paymentCount;          // Nombre de paiements enregistrés
+    private Boolean hasFractionalPayments; // Plus d'un paiement ?
+
     // Audit
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

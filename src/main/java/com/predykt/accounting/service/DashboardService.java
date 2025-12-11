@@ -81,6 +81,7 @@ public class DashboardService {
 
     /**
      * Calcule les KPIs principaux
+     * Utilise FinancialRatioService pour éviter la duplication de logique
      */
     private Map<String, Object> calculateKPIs(Company company, LocalDate asOfDate) {
         Map<String, Object> kpis = new HashMap<>();
@@ -106,48 +107,36 @@ public class DashboardService {
         kpis.put("yearlyExpenses", yearlyIncome.getTotalExpenses());
         kpis.put("yearlyNetIncome", yearlyIncome.getNetIncome());
 
-        // Marge brute et nette
-        if (yearlyIncome.getTotalRevenue().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal grossMargin = yearlyIncome.getGrossProfit()
-                .divide(yearlyIncome.getTotalRevenue(), 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
+        // ========== UTILISATION DE FinancialRatioService (évite duplication) ==========
+        // Calculer les ratios financiers via le service centralisé
+        var yearlyRatios = ratioService.calculateRatiosTransient(company.getId(), startOfYear, asOfDate);
 
-            BigDecimal netMargin = yearlyIncome.getNetIncome()
-                .divide(yearlyIncome.getTotalRevenue(), 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
+        // Marges (calculées par FinancialRatioService avec la même logique)
+        kpis.put("grossMarginPct", yearlyRatios.getGrossMarginPct());
+        kpis.put("netMarginPct", yearlyRatios.getNetMarginPct());
 
-            kpis.put("grossMarginPct", grossMargin.setScale(2, RoundingMode.HALF_UP));
-            kpis.put("netMarginPct", netMargin.setScale(2, RoundingMode.HALF_UP));
-        } else {
-            kpis.put("grossMarginPct", BigDecimal.ZERO);
-            kpis.put("netMarginPct", BigDecimal.ZERO);
-        }
+        // Ratios de rentabilité (bonus: ROA et ROE disponibles gratuitement)
+        kpis.put("roaPct", yearlyRatios.getRoaPct());
+        kpis.put("roePct", yearlyRatios.getRoePct());
 
-        // Tresorerie actuelle
+        // Tresorerie actuelle (depuis le bilan)
         BalanceSheetResponse balanceSheet = reportService.generateBalanceSheet(company.getId(), asOfDate);
         kpis.put("currentCash", balanceSheet.getCash());
         kpis.put("totalAssets", balanceSheet.getTotalAssets());
         kpis.put("totalLiabilities", balanceSheet.getTotalLiabilities());
         kpis.put("totalEquity", balanceSheet.getEquity());
 
-        // Ratio de liquidite
-        if (balanceSheet.getCurrentLiabilities().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal currentRatio = balanceSheet.getCurrentAssets()
-                .divide(balanceSheet.getCurrentLiabilities(), 2, RoundingMode.HALF_UP);
-            kpis.put("currentRatio", currentRatio);
-        } else {
-            kpis.put("currentRatio", BigDecimal.ZERO);
-        }
+        // Ratio de liquidité (calculé par FinancialRatioService)
+        kpis.put("currentRatio", yearlyRatios.getCurrentRatio());
+        kpis.put("quickRatio", yearlyRatios.getQuickRatio()); // Bonus: ratio de liquidité réduite
+        kpis.put("cashRatio", yearlyRatios.getCashRatio());   // Bonus: ratio de liquidité immédiate
 
-        // Ratio d'endettement
-        if (balanceSheet.getTotalAssets().compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal debtRatio = balanceSheet.getTotalLiabilities()
-                .divide(balanceSheet.getTotalAssets(), 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
-            kpis.put("debtRatioPct", debtRatio.setScale(2, RoundingMode.HALF_UP));
-        } else {
-            kpis.put("debtRatioPct", BigDecimal.ZERO);
-        }
+        // Ratio d'endettement (calculé par FinancialRatioService)
+        kpis.put("debtRatioPct", yearlyRatios.getDebtRatioPct());
+        kpis.put("debtToEquity", yearlyRatios.getDebtToEquity()); // Bonus: dette/capitaux propres
+
+        // Fonds de roulement (BFR)
+        kpis.put("workingCapital", yearlyRatios.getWorkingCapital());
 
         return kpis;
     }

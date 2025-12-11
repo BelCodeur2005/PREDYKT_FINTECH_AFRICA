@@ -159,12 +159,94 @@ public class FinancialRatioService {
     }
     
     /**
+     * Calcule les ratios à la volée SANS les sauvegarder en base
+     * Utilisé pour les tableaux de bord et affichages temps réel
+     *
+     * @param companyId ID de l'entreprise
+     * @param startDate Date de début de période
+     * @param endDate Date de fin de période
+     * @return Objet FinancialRatio non persisté (transient)
+     */
+    public FinancialRatio calculateRatiosTransient(Long companyId, LocalDate startDate, LocalDate endDate) {
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée"));
+
+        log.debug("Calcul transitoire des ratios pour {} du {} au {}", company.getName(), startDate, endDate);
+
+        // Récupérer les données financières de base
+        var incomeStatement = reportService.generateIncomeStatement(companyId, startDate, endDate);
+        var balanceSheet = reportService.generateBalanceSheet(companyId, endDate);
+
+        // Créer l'entité FinancialRatio (NON PERSISTÉE)
+        FinancialRatio ratio = new FinancialRatio();
+        ratio.setCompany(company);
+        ratio.setFiscalYear(String.valueOf(endDate.getYear()));
+        ratio.setPeriodStart(startDate);
+        ratio.setPeriodEnd(endDate);
+
+        // Données brutes
+        ratio.setTotalRevenue(incomeStatement.getTotalRevenue());
+        ratio.setTotalExpenses(incomeStatement.getTotalExpenses());
+        ratio.setNetIncome(incomeStatement.getNetIncome());
+        ratio.setTotalAssets(balanceSheet.getTotalAssets());
+        ratio.setTotalEquity(balanceSheet.getEquity());
+        ratio.setTotalDebt(balanceSheet.getLongTermLiabilities().add(balanceSheet.getCurrentLiabilities()));
+
+        // Calcul du BFR
+        ratio.setWorkingCapital(calculateWorkingCapital(balanceSheet));
+
+        // === RATIOS DE RENTABILITÉ ===
+        ratio.setGrossMarginPct(calculatePercentage(
+            incomeStatement.getGrossProfit(),
+            incomeStatement.getTotalRevenue()
+        ));
+
+        ratio.setNetMarginPct(calculatePercentage(
+            incomeStatement.getNetIncome(),
+            incomeStatement.getTotalRevenue()
+        ));
+
+        ratio.setRoaPct(calculatePercentage(
+            incomeStatement.getNetIncome(),
+            balanceSheet.getTotalAssets()
+        ));
+
+        ratio.setRoePct(calculatePercentage(
+            incomeStatement.getNetIncome(),
+            balanceSheet.getEquity()
+        ));
+
+        // === RATIOS DE LIQUIDITÉ ===
+        BigDecimal currentAssets = balanceSheet.getCurrentAssets().add(balanceSheet.getCash());
+        BigDecimal currentLiabilities = balanceSheet.getCurrentLiabilities();
+        ratio.setCurrentRatio(divide(currentAssets, currentLiabilities));
+        ratio.setQuickRatio(divide(currentAssets, currentLiabilities));
+        ratio.setCashRatio(divide(balanceSheet.getCash(), currentLiabilities));
+
+        // === RATIOS DE SOLVABILITÉ ===
+        BigDecimal totalDebt = ratio.getTotalDebt();
+        ratio.setDebtRatioPct(calculatePercentage(totalDebt, balanceSheet.getTotalAssets()));
+        ratio.setDebtToEquity(divide(totalDebt, balanceSheet.getEquity()));
+
+        // === RATIOS D'ACTIVITÉ ===
+        ratio.setAssetTurnover(divide(
+            incomeStatement.getTotalRevenue(),
+            balanceSheet.getTotalAssets()
+        ));
+
+        // Note: DSO, DIO, DPO non calculés pour optimiser les performances
+        // (nécessitent des requêtes additionnelles sur le grand livre)
+
+        return ratio;
+    }
+
+    /**
      * Récupère les ratios d'une entreprise pour une année
      */
     public FinancialRatio getRatiosByYear(Long companyId, String fiscalYear) {
         Company company = companyRepository.findById(companyId)
             .orElseThrow(() -> new ResourceNotFoundException("Entreprise non trouvée"));
-        
+
         return ratioRepository.findByCompanyAndFiscalYear(company, fiscalYear)
             .orElseThrow(() -> new ResourceNotFoundException(
                 "Aucun ratio trouvé pour l'année " + fiscalYear

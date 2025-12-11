@@ -11,6 +11,7 @@ import com.predykt.accounting.repository.BankReconciliationRepository;
 import com.predykt.accounting.repository.BankReconciliationSuggestionRepository;
 import com.predykt.accounting.repository.BankTransactionRepository;
 import com.predykt.accounting.repository.GeneralLedgerRepository;
+import com.predykt.accounting.repository.PaymentRepository;
 import com.predykt.accounting.service.matching.AdvancedMatchingAlgorithms;
 import com.predykt.accounting.service.ml.MLMatchingService;
 import com.predykt.accounting.dto.ml.MLPredictionResult;
@@ -56,6 +57,8 @@ public class BankReconciliationMatchingService {
     private final BankReconciliationSuggestionRepository suggestionRepository;
     private final AdvancedMatchingAlgorithms advancedAlgorithms;
     private final BankReconciliationMatchingConfig config;
+    private final PaymentRepository paymentRepository;
+    private final PaymentReconciliationService paymentReconciliationService;
 
     @Autowired(required = false)  // Optional - ML peut être désactivé
     private MLMatchingService mlMatchingService;
@@ -257,6 +260,21 @@ public class BankReconciliationMatchingService {
             }
         }
         log.info("✅ Phase 2 terminée: {} correspondances probables", probableMatches);
+
+        // ========== PHASE 2.3: MATCHING PAYMENT ↔ BANKTRANSACTION ==========
+        log.info("🔍 Phase 2.3: Rapprochement Payment ↔ BankTransaction (paiements logiques)");
+        int paymentMatches = 0;
+        if (!checkTimeout()) {
+            paymentMatches = performPaymentMatching(
+                reconciliation,
+                bankTransactions,
+                matchedBankTransactionIds,
+                resultBuilder
+            );
+            probableMatches += paymentMatches;
+            manualReviewCount += paymentMatches;
+            log.info("✅ Phase 2.3 terminée: {} correspondances Payment ↔ BankTransaction", paymentMatches);
+        }
 
         // ========== PHASE 2.4: MATCHING ML (INTELLIGENCE ARTIFICIELLE) ==========
         log.info("🔍 Phase 2.4: Prédictions ML (Random Forest - Auto-learning)");
@@ -1070,6 +1088,132 @@ public class BankReconciliationMatchingService {
                 log.error("Erreur prédiction ML pour BT {}: {}", bt.getId(), e.getMessage());
                 // Continuer avec les autres transactions
             }
+        }
+
+        return matchCount;
+    }
+
+    /**
+     * ✅ NOUVEAU VERSION 3.0 PHASE 2.3: Matching Payment ↔ BankTransaction
+     * Rapproche les paiements logiques (Payment) avec les transactions bancaires réelles
+     *
+     * Cette phase comble le gap critique identifié dans l'audit de cohérence:
+     * - Les Payments représentent les paiements logiques liés aux factures
+     * - Les BankTransactions sont les mouvements bancaires réels importés
+     * - Ce matching permet de tracer la réalisation effective des paiements
+     */
+    private int performPaymentMatching(
+        BankReconciliation reconciliation,
+        List<BankTransaction> allBankTransactions,
+        Set<Long> matchedBankTransactionIds,
+        AutoMatchResultDTO.AutoMatchResultDTOBuilder resultBuilder) {
+
+        int matchCount = 0;
+        Company company = reconciliation.getCompany();
+
+        // Utiliser le PaymentReconciliationService pour obtenir des suggestions
+        List<PaymentReconciliationService.ReconciliationSuggestion> suggestions =
+            paymentReconciliationService.suggestReconciliations(company);
+
+        log.info("📋 {} suggestions de rapprochement Payment ↔ BankTransaction trouvées", suggestions.size());
+
+        // Traiter chaque suggestion
+        for (PaymentReconciliationService.ReconciliationSuggestion suggestion : suggestions) {
+            if (checkTimeout()) break;
+
+            // Vérifier que la BankTransaction n'est pas déjà matchée
+            if (matchedBankTransactionIds.contains(suggestion.getBankTransactionId())) {
+                continue;
+            }
+
+            // Vérifier que la BankTransaction fait partie du rapprochement en cours
+            boolean btInCurrentReconciliation = allBankTransactions.stream()
+                .anyMatch(bt -> bt.getId().equals(suggestion.getBankTransactionId()));
+
+            if (!btInCurrentReconciliation) {
+                continue;
+            }
+
+            // Récupérer les entités complètes
+            BankTransaction bt = allBankTransactions.stream()
+                .filter(b -> b.getId().equals(suggestion.getBankTransactionId()))
+                .findFirst()
+                .orElse(null);
+
+            if (bt == null) continue;
+
+            Payment payment = paymentRepository.findById(suggestion.getPaymentId()).orElse(null);
+            if (payment == null) continue;
+
+            // Créer la suggestion de matching pour le rapprochement bancaire
+            // Score basé sur le score du PaymentReconciliationService
+            BigDecimal confidenceScore = new BigDecimal(suggestion.getScore());
+
+            String reason = String.format(
+                "💳 Payment %s (Date: %s, Montant: %s XAF) correspond à la transaction bancaire (Score: %d%%)",
+                payment.getPaymentNumber(),
+                payment.getPaymentDate(),
+                payment.getAmount(),
+                suggestion.getScore()
+            );
+
+            List<String> reasons = new ArrayList<>();
+            reasons.add(reason);
+            reasons.add("✓ Montant Payment: " + suggestion.getPaymentAmount());
+            reasons.add("✓ Montant BankTransaction: " + suggestion.getBankTransactionAmount());
+            reasons.add("✓ Date Payment: " + suggestion.getPaymentDate());
+            reasons.add("✓ Date BankTransaction: " + suggestion.getBankTransactionDate());
+
+            if (payment.getTransactionReference() != null) {
+                reasons.add("✓ Référence transaction: " + payment.getTransactionReference());
+            }
+
+            MatchScore matchScore = new MatchScore(confidenceScore, reasons);
+
+            // Créer une suggestion basée sur le Payment (sans GL car c'est un matching Payment)
+            BankReconciliationSuggestion persistedSuggestion = BankReconciliationSuggestion.builder()
+                .reconciliation(reconciliation)
+                .suggestedItemType(PendingItemType.UNCATEGORIZED)
+                .confidenceScore(confidenceScore)
+                .confidenceLevel(calculateConfidenceLevel(confidenceScore))
+                .status(SuggestionStatus.PENDING)
+                .suggestedAmount(suggestion.getPaymentAmount())
+                .description(String.format(
+                    "Payment %s → %s",
+                    payment.getPaymentNumber(),
+                    payment.getDescription() != null ? payment.getDescription() : "Paiement"
+                ))
+                .thirdParty(payment.isCustomerPayment() ?
+                    (payment.getCustomer() != null ? payment.getCustomer().getName() : null) :
+                    (payment.getSupplier() != null ? payment.getSupplier().getName() : null))
+                .transactionDate(payment.getPaymentDate())
+                .matchingReason(String.join("; ", reasons))
+                .requiresManualReview(confidenceScore.compareTo(config.getAutoApproveThreshold()) < 0)
+                .matchType("PAYMENT_TO_BANK")
+                .build();
+
+            // Ajouter la transaction bancaire
+            persistedSuggestion.addBankTransaction(bt);
+
+            // Note: On n'ajoute pas de GL Entry car le Payment peut avoir son propre GL Entry
+            // qui n'est pas nécessairement dans le compte bancaire 521
+
+            // Sauvegarder la suggestion
+            persistedSuggestion = suggestionRepository.save(persistedSuggestion);
+
+            // Convertir en DTO et ajouter au résultat
+            MatchSuggestionDTO suggestionDTO = convertToDTO(persistedSuggestion);
+            resultBuilder.suggestions(addToList(resultBuilder.build().getSuggestions(), suggestionDTO));
+
+            // Marquer la BankTransaction comme matchée
+            matchedBankTransactionIds.add(bt.getId());
+            matchCount++;
+
+            log.info("💳 Payment Match: Payment #{} ({}) ↔ BankTransaction #{} (Score: {}%)",
+                payment.getId(),
+                payment.getPaymentNumber(),
+                bt.getId(),
+                suggestion.getScore());
         }
 
         return matchCount;

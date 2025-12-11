@@ -61,7 +61,14 @@ public class BankTransaction extends BaseEntity {
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "gl_entry_id")
     private GeneralLedger glEntry;  // Écriture comptable associée après réconciliation
-    
+
+    /**
+     * Paiements logiques associés à cette transaction bancaire
+     * Un virement peut contenir plusieurs paiements (ex: virement groupé)
+     */
+    @OneToMany(mappedBy = "bankTransaction", fetch = FetchType.LAZY)
+    private java.util.List<Payment> payments = new java.util.ArrayList<>();
+
     @Column(name = "third_party_name", length = 200)
     private String thirdPartyName;  // Nom du client/fournisseur extrait de la description
     

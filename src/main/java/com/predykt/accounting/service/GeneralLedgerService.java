@@ -30,6 +30,7 @@ public class GeneralLedgerService {
     private final CompanyRepository companyRepository;
     private final ChartOfAccountsRepository chartRepository;
     private final VATRecoverabilityService vatRecoverabilityService;
+    private final ChartOfAccountsService chartService;
     
     /**
      * Enregistrer une écriture comptable (respecte la partie double)
@@ -258,4 +259,141 @@ public class GeneralLedgerService {
         BigDecimal totalDebit,
         BigDecimal totalCredit
     ) {}
+
+    // ==================== MÉTHODES CENTRALISÉES DE CALCUL DE SOLDES ====================
+    // Ces méthodes éliminent la duplication de code dans FinancialReportService,
+    // TAFIREService, VATDeclarationService, etc.
+
+    /**
+     * 🟢 OPTIMISATION: Calcule le solde total d'une classe de comptes à une date donnée
+     *
+     * Exemple: getAccountClassBalance(companyId, "7", asOfDate) → Total revenus
+     *
+     * @param companyId ID de l'entreprise
+     * @param classPrefix Préfixe de classe (ex: "7" pour revenus, "6" pour charges)
+     * @param asOfDate Date à laquelle calculer le solde
+     * @return Solde total de la classe de comptes
+     */
+    public BigDecimal getAccountClassBalance(Long companyId, String classPrefix, LocalDate asOfDate) {
+        log.debug("📊 Calcul solde classe {} à la date {}", classPrefix, asOfDate);
+
+        return chartService.getActiveAccounts(companyId).stream()
+            .filter(account -> account.getAccountNumber().startsWith(classPrefix))
+            .map(account -> {
+                try {
+                    return getAccountBalance(companyId, account.getAccountNumber(), asOfDate);
+                } catch (ResourceNotFoundException e) {
+                    log.trace("Compte {} non trouvé, solde = 0", account.getAccountNumber());
+                    return BigDecimal.ZERO;
+                }
+            })
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * 🟢 OPTIMISATION: Calcule le solde d'une classe de comptes en excluant un préfixe
+     *
+     * Exemple: getAccountClassBalance(companyId, "4", asOfDate, "40")
+     *          → Tous les comptes de classe 4 SAUF ceux commençant par 40
+     *
+     * @param companyId ID de l'entreprise
+     * @param classPrefix Préfixe de classe à inclure
+     * @param asOfDate Date à laquelle calculer
+     * @param excludePrefix Préfixe à exclure
+     * @return Solde total filtré
+     */
+    public BigDecimal getAccountClassBalance(Long companyId, String classPrefix,
+                                            LocalDate asOfDate, String excludePrefix) {
+        log.debug("📊 Calcul solde classe {} (excluant {}) à la date {}",
+            classPrefix, excludePrefix, asOfDate);
+
+        return chartService.getActiveAccounts(companyId).stream()
+            .filter(account -> account.getAccountNumber().startsWith(classPrefix)
+                            && !account.getAccountNumber().startsWith(excludePrefix))
+            .map(account -> {
+                try {
+                    return getAccountBalance(companyId, account.getAccountNumber(), asOfDate);
+                } catch (ResourceNotFoundException e) {
+                    log.trace("Compte {} non trouvé, solde = 0", account.getAccountNumber());
+                    return BigDecimal.ZERO;
+                }
+            })
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * 🟢 OPTIMISATION: Calcule la VARIATION du solde d'un compte sur une période
+     *
+     * Calcul: Solde(endDate) - Solde(startDate - 1 jour)
+     *
+     * Utile pour tableaux de flux de trésorerie, variations de BFR, etc.
+     *
+     * @param companyId ID de l'entreprise
+     * @param accountNumber Numéro de compte
+     * @param startDate Date de début de période
+     * @param endDate Date de fin de période
+     * @return Variation du solde (positif = augmentation, négatif = diminution)
+     */
+    public BigDecimal getAccountBalanceChange(Long companyId, String accountNumber,
+                                             LocalDate startDate, LocalDate endDate) {
+        log.debug("📊 Calcul variation solde compte {} du {} au {}",
+            accountNumber, startDate, endDate);
+
+        try {
+            BigDecimal endBalance = getAccountBalance(companyId, accountNumber, endDate);
+            BigDecimal startBalance = getAccountBalance(companyId, accountNumber, startDate.minusDays(1));
+            return endBalance.subtract(startBalance);
+        } catch (ResourceNotFoundException e) {
+            log.trace("Compte {} non trouvé, variation = 0", accountNumber);
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * 🟢 OPTIMISATION: Calcule la VARIATION du solde d'une classe de comptes sur une période
+     *
+     * Exemple: getAccountClassBalanceChange(companyId, "3", startDate, endDate)
+     *          → Variation des stocks sur la période
+     *
+     * @param companyId ID de l'entreprise
+     * @param classPrefix Préfixe de classe
+     * @param startDate Date de début de période
+     * @param endDate Date de fin de période
+     * @return Variation totale de la classe
+     */
+    public BigDecimal getAccountClassBalanceChange(Long companyId, String classPrefix,
+                                                  LocalDate startDate, LocalDate endDate) {
+        log.debug("📊 Calcul variation solde classe {} du {} au {}",
+            classPrefix, startDate, endDate);
+
+        return chartService.getActiveAccounts(companyId).stream()
+            .filter(account -> account.getAccountNumber().startsWith(classPrefix))
+            .map(account -> getAccountBalanceChange(companyId, account.getAccountNumber(), startDate, endDate))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * 🟢 OPTIMISATION: Calcule la VARIATION du solde d'une classe (avec exclusion)
+     *
+     * Combine filtrage et calcul de variation sur période.
+     *
+     * @param companyId ID de l'entreprise
+     * @param classPrefix Préfixe de classe à inclure
+     * @param startDate Date de début
+     * @param endDate Date de fin
+     * @param excludePrefix Préfixe à exclure
+     * @return Variation totale filtrée
+     */
+    public BigDecimal getAccountClassBalanceChange(Long companyId, String classPrefix,
+                                                  LocalDate startDate, LocalDate endDate,
+                                                  String excludePrefix) {
+        log.debug("📊 Calcul variation solde classe {} (excluant {}) du {} au {}",
+            classPrefix, excludePrefix, startDate, endDate);
+
+        return chartService.getActiveAccounts(companyId).stream()
+            .filter(account -> account.getAccountNumber().startsWith(classPrefix)
+                            && !account.getAccountNumber().startsWith(excludePrefix))
+            .map(account -> getAccountBalanceChange(companyId, account.getAccountNumber(), startDate, endDate))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
 }

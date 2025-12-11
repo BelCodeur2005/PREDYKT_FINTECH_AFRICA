@@ -43,6 +43,20 @@ public class TaxCalculation {
     private GeneralLedger transaction;
 
     /**
+     * Facture client associée (pour TVA collectée)
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "invoice_id")
+    private Invoice invoice;
+
+    /**
+     * Facture fournisseur associée (pour TVA déductible, AIR, IRPP)
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "bill_id")
+    private Bill bill;
+
+    /**
      * Fournisseur associé (pour AIR et IRPP Loyer)
      */
     @ManyToOne(fetch = FetchType.LAZY)

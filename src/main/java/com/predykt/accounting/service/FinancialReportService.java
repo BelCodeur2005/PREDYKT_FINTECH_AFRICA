@@ -347,38 +347,49 @@ public class FinancialReportService {
             .build();
     }
 
-    // Méthodes utilitaires privées
+    // ==================== MÉTHODES DÉLÉGUÉES À GeneralLedgerService ====================
+    // 🟢 OPTIMISATION: Ces méthodes privées ont été remplacées par des appels directs
+    // à GeneralLedgerService pour éliminer la duplication de code (Phase 3).
+    //
+    // Migration: FinancialReportService utilise maintenant:
+    // - glService.getAccountClassBalance() au lieu de calculateAccountClassBalance()
+    // - glService.getAccountBalanceChange() au lieu de calculateAccountBalance()
+    // - glService.getAccountClassBalanceChange() au lieu de calculateAccountClassBalance(period)
+    //
+    // Les méthodes ci-dessous sont conservées pour compatibilité ascendante (deprecated).
+
+    /**
+     * @deprecated Utiliser {@link GeneralLedgerService#getAccountClassBalance(Long, String, LocalDate)}
+     */
+    @Deprecated(since = "Phase 3", forRemoval = true)
     private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix, LocalDate asOfDate) {
-        return chartService.getActiveAccounts(companyId).stream()
-            .filter(account -> account.getAccountNumber().startsWith(classPrefix))
-            .map(account -> glService.getAccountBalance(companyId, account.getAccountNumber(), asOfDate))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return glService.getAccountClassBalance(companyId, classPrefix, asOfDate);
     }
-    
-    private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix, 
+
+    /**
+     * @deprecated Utiliser {@link GeneralLedgerService#getAccountClassBalance(Long, String, LocalDate, String)}
+     */
+    @Deprecated(since = "Phase 3", forRemoval = true)
+    private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix,
                                                     LocalDate asOfDate, String excludePrefix) {
-        return chartService.getActiveAccounts(companyId).stream()
-            .filter(account -> account.getAccountNumber().startsWith(classPrefix) 
-                            && !account.getAccountNumber().startsWith(excludePrefix))
-            .map(account -> glService.getAccountBalance(companyId, account.getAccountNumber(), asOfDate))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return glService.getAccountClassBalance(companyId, classPrefix, asOfDate, excludePrefix);
     }
-    
-    private BigDecimal calculateAccountBalance(Long companyId, String accountNumber, 
+
+    /**
+     * @deprecated Utiliser {@link GeneralLedgerService#getAccountBalanceChange(Long, String, LocalDate, LocalDate)}
+     */
+    @Deprecated(since = "Phase 3", forRemoval = true)
+    private BigDecimal calculateAccountBalance(Long companyId, String accountNumber,
                                                LocalDate startDate, LocalDate endDate) {
-        try {
-            return glService.getAccountBalance(companyId, accountNumber, endDate)
-                .subtract(glService.getAccountBalance(companyId, accountNumber, startDate.minusDays(1)));
-        } catch (ResourceNotFoundException e) {
-            return BigDecimal.ZERO;
-        }
+        return glService.getAccountBalanceChange(companyId, accountNumber, startDate, endDate);
     }
-    
-    private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix, 
+
+    /**
+     * @deprecated Utiliser {@link GeneralLedgerService#getAccountClassBalanceChange(Long, String, LocalDate, LocalDate)}
+     */
+    @Deprecated(since = "Phase 3", forRemoval = true)
+    private BigDecimal calculateAccountClassBalance(Long companyId, String classPrefix,
                                                     LocalDate startDate, LocalDate endDate) {
-        return chartService.getActiveAccounts(companyId).stream()
-            .filter(account -> account.getAccountNumber().startsWith(classPrefix))
-            .map(account -> calculateAccountBalance(companyId, account.getAccountNumber(), startDate, endDate))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return glService.getAccountClassBalanceChange(companyId, classPrefix, startDate, endDate);
     }
 }
