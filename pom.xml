@@ -113,11 +113,23 @@
         </dependency>
 
         <!-- ========== PDF EXPORT ========== -->
+        <!-- iText 7 - Génération PDF -->
         <dependency>
             <groupId>com.itextpdf</groupId>
-            <artifactId>itext7-core</artifactId>
+            <artifactId>kernel</artifactId>
             <version>8.0.2</version>
-            <type>pom</type>
+        </dependency>
+
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>layout</artifactId>
+            <version>8.0.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.itextpdf</groupId>
+            <artifactId>io</artifactId>
+            <version>8.0.2</version>
         </dependency>
 
         <!-- ========== EXCEL EXPORT ========== -->

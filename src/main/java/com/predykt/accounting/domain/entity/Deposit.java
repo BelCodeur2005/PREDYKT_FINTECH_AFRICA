@@ -91,6 +91,10 @@ public class Deposit extends BaseEntity {
     @JoinColumn(name = "payment_id", foreignKey = @ForeignKey(name = "fk_deposit_payment"))
     private Payment payment;  // Lien avec l'encaissement bancaire
 
+    @OneToMany(mappedBy = "deposit", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @Builder.Default
+    private java.util.List<DepositApplication> applications = new java.util.ArrayList<>();  // Imputations partielles (Phase 2)
+
     // ==================== MONTANTS OHADA ====================
 
     @Column(name = "amount_ht", nullable = false, precision = 15, scale = 2)
@@ -114,6 +118,26 @@ public class Deposit extends BaseEntity {
     @NotNull(message = "Le montant TTC est obligatoire")
     @DecimalMin(value = "0.01", message = "Le montant TTC doit être positif")
     private BigDecimal amountTtc = BigDecimal.ZERO;
+
+    /**
+     * Montant total déjà imputé sur des factures (Phase 2 - Imputation Partielle)
+     * Somme de tous les deposit_applications.amount_ttc
+     */
+    @Column(name = "amount_applied", nullable = false, precision = 15, scale = 2)
+    @NotNull(message = "Le montant appliqué est obligatoire")
+    @DecimalMin(value = "0.00", message = "Le montant appliqué doit être positif ou nul")
+    @Builder.Default
+    private BigDecimal amountApplied = BigDecimal.ZERO;
+
+    /**
+     * Montant restant disponible pour imputation (Phase 2 - Imputation Partielle)
+     * amountRemaining = amountTtc - amountApplied
+     */
+    @Column(name = "amount_remaining", nullable = false, precision = 15, scale = 2)
+    @NotNull(message = "Le montant restant est obligatoire")
+    @DecimalMin(value = "0.00", message = "Le montant restant doit être positif ou nul")
+    @Builder.Default
+    private BigDecimal amountRemaining = BigDecimal.ZERO;
 
     // ==================== ÉTAT DE L'ACOMPTE ====================
 
@@ -167,8 +191,14 @@ public class Deposit extends BaseEntity {
         // Calcul montant TTC
         this.amountTtc = amountHt.add(vatAmount);
 
-        log.debug("💰 Calcul acompte: {}% TVA sur {} XAF HT = {} XAF TVA → {} XAF TTC",
-            vatRate, amountHt, vatAmount, amountTtc);
+        // Phase 2: Initialiser le montant restant lors de la création
+        if (this.amountApplied == null) {
+            this.amountApplied = BigDecimal.ZERO;
+        }
+        this.amountRemaining = this.amountTtc.subtract(this.amountApplied);
+
+        log.debug("💰 Calcul acompte: {}% TVA sur {} XAF HT = {} XAF TVA → {} XAF TTC (restant: {} XAF)",
+            vatRate, amountHt, vatAmount, amountTtc, amountRemaining);
     }
 
     /**
@@ -295,13 +325,25 @@ public class Deposit extends BaseEntity {
     }
 
     /**
-     * Retourne le montant restant disponible de l'acompte (pour acomptes partiels futurs).
-     * Pour l'instant retourne toujours le montant total (pas de gestion d'imputation partielle).
+     * Retourne le montant restant disponible de l'acompte (Phase 2 - Imputation Partielle).
+     * Calcule dynamiquement basé sur les applications effectuées.
      *
-     * @return Montant disponible
+     * @return Montant disponible pour imputation
      */
     public BigDecimal getAvailableAmount() {
-        return this.isApplied ? BigDecimal.ZERO : this.amountTtc;
+        if (this.amountRemaining != null) {
+            return this.amountRemaining;
+        }
+
+        // Fallback: calculer basé sur les applications
+        if (this.applications != null && !this.applications.isEmpty()) {
+            BigDecimal totalApplied = this.applications.stream()
+                .map(DepositApplication::getAmountTtc)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+            return this.amountTtc.subtract(totalApplied);
+        }
+
+        return this.amountTtc;
     }
 
     /**
@@ -327,5 +369,150 @@ public class Deposit extends BaseEntity {
         desc.append(" - ").append(amountTtc).append(" XAF TTC");
 
         return desc.toString();
+    }
+
+    // ==================== PHASE 2: MÉTHODES POUR IMPUTATION PARTIELLE ====================
+
+    /**
+     * Ajoute une imputation partielle à cet acompte.
+     * Met à jour automatiquement amountApplied, amountRemaining et isApplied.
+     *
+     * @param application L'imputation partielle à ajouter
+     */
+    public void addApplication(DepositApplication application) {
+        if (application == null) {
+            throw new IllegalArgumentException("L'application ne peut pas être NULL");
+        }
+
+        this.applications.add(application);
+        application.setDeposit(this);
+
+        // Mettre à jour les montants
+        this.amountApplied = this.amountApplied.add(application.getAmountTtc());
+        this.amountRemaining = this.amountTtc.subtract(this.amountApplied);
+
+        // Marquer comme complètement imputé si tout le montant est utilisé
+        if (this.amountRemaining.compareTo(BigDecimal.ZERO) == 0) {
+            this.isApplied = true;
+        }
+
+        log.info("➕ Application de {} XAF ajoutée à l'acompte {} (restant: {} XAF)",
+            application.getAmountTtc(), this.depositNumber, this.amountRemaining);
+    }
+
+    /**
+     * Retire une imputation partielle de cet acompte.
+     * Met à jour automatiquement amountApplied, amountRemaining et isApplied.
+     *
+     * @param application L'imputation partielle à retirer
+     */
+    public void removeApplication(DepositApplication application) {
+        if (application == null) {
+            throw new IllegalArgumentException("L'application ne peut pas être NULL");
+        }
+
+        this.applications.remove(application);
+
+        // Mettre à jour les montants
+        this.amountApplied = this.amountApplied.subtract(application.getAmountTtc());
+        this.amountRemaining = this.amountTtc.subtract(this.amountApplied);
+
+        // Démarquer comme complètement imputé
+        if (this.amountRemaining.compareTo(BigDecimal.ZERO) > 0) {
+            this.isApplied = false;
+        }
+
+        log.warn("➖ Application de {} XAF retirée de l'acompte {} (restant: {} XAF)",
+            application.getAmountTtc(), this.depositNumber, this.amountRemaining);
+    }
+
+    /**
+     * Vérifie si l'acompte a des imputations partielles.
+     *
+     * @return true si au moins une imputation existe
+     */
+    public boolean hasApplications() {
+        return this.applications != null && !this.applications.isEmpty();
+    }
+
+    /**
+     * Retourne le nombre d'imputations partielles.
+     *
+     * @return Nombre d'applications
+     */
+    public int getApplicationCount() {
+        return this.applications != null ? this.applications.size() : 0;
+    }
+
+    /**
+     * Vérifie si l'acompte est partiellement imputé.
+     *
+     * @return true si partiellement imputé (amountApplied > 0 mais < amountTtc)
+     */
+    public boolean isPartiallyApplied() {
+        return this.amountApplied.compareTo(BigDecimal.ZERO) > 0
+            && this.amountRemaining.compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    /**
+     * Vérifie si l'acompte est complètement imputé.
+     *
+     * @return true si complètement imputé (amountRemaining == 0)
+     */
+    public boolean isFullyApplied() {
+        return this.amountRemaining.compareTo(BigDecimal.ZERO) == 0;
+    }
+
+    /**
+     * Retourne le pourcentage d'utilisation de l'acompte.
+     *
+     * @return Pourcentage (0-100)
+     */
+    public BigDecimal getUsagePercentage() {
+        if (this.amountTtc.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return this.amountApplied
+            .multiply(new BigDecimal("100"))
+            .divide(this.amountTtc, 2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Recalcule les montants appliqués et restants basé sur les applications.
+     * Utile pour la synchronisation après des modifications en masse.
+     */
+    public void recalculateApplicationAmounts() {
+        if (this.applications == null || this.applications.isEmpty()) {
+            this.amountApplied = BigDecimal.ZERO;
+            this.amountRemaining = this.amountTtc;
+            this.isApplied = false;
+            return;
+        }
+
+        this.amountApplied = this.applications.stream()
+            .map(DepositApplication::getAmountTtc)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        this.amountRemaining = this.amountTtc.subtract(this.amountApplied);
+        this.isApplied = this.amountRemaining.compareTo(BigDecimal.ZERO) == 0;
+
+        log.debug("♻️ Recalcul acompte {}: {} XAF appliqués, {} XAF restants",
+            this.depositNumber, this.amountApplied, this.amountRemaining);
+    }
+
+    /**
+     * Retourne le statut lisible de l'acompte.
+     *
+     * @return Statut ("Disponible", "Partiellement imputé", "Complètement imputé")
+     */
+    public String getStatus() {
+        if (isFullyApplied()) {
+            return "Complètement imputé";
+        } else if (isPartiallyApplied()) {
+            return String.format("Partiellement imputé (%.2f%%)", getUsagePercentage());
+        } else {
+            return "Disponible";
+        }
     }
 }
